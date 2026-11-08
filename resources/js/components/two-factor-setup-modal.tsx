@@ -4,7 +4,6 @@ import { Check, Copy, ScanLine } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import AlertError from '@/components/alert-error';
 import InputError from '@/components/input-error';
-import { Button } from '@/components/ui/button';
 import {
     Dialog,
     DialogContent,
@@ -21,11 +20,12 @@ import { Spinner } from '@/components/ui/spinner';
 import { useAppearance } from '@/hooks/use-appearance';
 import { useClipboard } from '@/hooks/use-clipboard';
 import { OTP_MAX_LENGTH } from '@/hooks/use-two-factor-auth';
+import { t } from '@/lib/i18n';
 import { confirm } from '@/routes/two-factor';
 
 function GridScanIcon() {
     return (
-        <div className="border-border bg-card mb-3 rounded-full border p-0.5 shadow-sm">
+        <div className="border-border bg-card mb-3 rounded-full border p-0.5">
             <div className="border-border bg-muted relative overflow-hidden rounded-full border p-2.5">
                 <div className="absolute inset-0 grid grid-cols-5 opacity-50">
                     {Array.from({ length: 5 }, (_, i) => (
@@ -96,15 +96,19 @@ function TwoFactorSetupStep({
                     </div>
 
                     <div className="flex w-full space-x-5">
-                        <Button className="w-full" onClick={onNextStep}>
+                        <button
+                            type="button"
+                            className="btn-kuning inline-flex min-h-12 w-full items-center justify-center rounded-xl px-5 text-sm"
+                            onClick={onNextStep}
+                        >
                             {buttonText}
-                        </Button>
+                        </button>
                     </div>
 
                     <div className="relative flex w-full items-center justify-center">
                         <div className="bg-border absolute inset-0 top-1/2 h-px w-full" />
-                        <span className="bg-card relative px-2 py-1">
-                            or, enter the code manually
+                        <span className="label-caps bg-background relative px-2 py-1">
+                            {t('atau ketik kodenya manual')}
                         </span>
                     </div>
 
@@ -123,8 +127,10 @@ function TwoFactorSetupStep({
                                         className="bg-background text-foreground h-full w-full p-3 outline-none"
                                     />
                                     <button
+                                        type="button"
                                         onClick={() => copy(manualSetupKey)}
-                                        className="border-border hover:bg-muted border-l px-3"
+                                        aria-label={t('Salin kode')}
+                                        className="border-border hover:bg-sunken min-w-11 border-l px-3"
                                     >
                                         <IconComponent className="w-4" />
                                     </button>
@@ -203,24 +209,23 @@ function TwoFactorVerificationStep({
                         </div>
 
                         <div className="flex w-full space-x-5">
-                            <Button
+                            <button
                                 type="button"
-                                variant="outline"
-                                className="flex-1"
+                                className="border-border hover:bg-sunken inline-flex min-h-12 flex-1 items-center justify-center rounded-xl border px-4 text-sm font-semibold disabled:opacity-45"
                                 onClick={onBack}
                                 disabled={processing}
                             >
-                                Back
-                            </Button>
-                            <Button
+                                {t('Kembali')}
+                            </button>
+                            <button
                                 type="submit"
-                                className="flex-1"
+                                className="btn-kuning inline-flex min-h-12 flex-1 items-center justify-center rounded-xl px-4 text-sm disabled:opacity-45"
                                 disabled={
                                     processing || code.length < OTP_MAX_LENGTH
                                 }
                             >
-                                Confirm
-                            </Button>
+                                {t('Konfirmasi')}
+                            </button>
                         </div>
                     </div>
                 </>
@@ -262,27 +267,30 @@ export default function TwoFactorSetupModal({
     }>(() => {
         if (twoFactorEnabled) {
             return {
-                title: 'Two-factor authentication enabled',
-                description:
-                    'Two-factor authentication is now enabled. Scan the QR code or enter the setup key in your authenticator app.',
-                buttonText: 'Close',
+                title: t('Verifikasi 2 langkah aktif'),
+                description: t(
+                    'Verifikasi 2 langkah udah nyala. Scan QR atau ketik kode setup di aplikasi autentikator lo.',
+                ),
+                buttonText: t('Tutup'),
             };
         }
 
         if (showVerificationStep) {
             return {
-                title: 'Verify authentication code',
-                description:
-                    'Enter the 6-digit code from your authenticator app',
-                buttonText: 'Continue',
+                title: t('Cek kode autentikasi'),
+                description: t(
+                    'Masukin 6 digit kode dari aplikasi autentikator lo',
+                ),
+                buttonText: t('Lanjut'),
             };
         }
 
         return {
-            title: 'Enable two-factor authentication',
-            description:
-                'To finish enabling two-factor authentication, scan the QR code or enter the setup key in your authenticator app',
-            buttonText: 'Continue',
+            title: t('Aktifkan verifikasi 2 langkah'),
+            description: t(
+                'Scan QR ini atau ketik kode setup di aplikasi autentikator lo buat nyelesaiin aktivasi',
+            ),
+            buttonText: t('Lanjut'),
         };
     }, [twoFactorEnabled, showVerificationStep]);
 

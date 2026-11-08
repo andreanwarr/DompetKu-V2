@@ -24,7 +24,8 @@ A personal finance tracker built on Laravel 13, React 19, Inertia, PostgreSQL, a
 - **Multi-sheet Excel export** including a flat `Analisis` sheet for AI parsing.
 - Indonesian/English language and light/dark/system theme.
 - Mobile-first layout with off-canvas sidebar, adaptive forms, and 44 px touch targets.
-- Authentication, profile, passkeys, and 2FA.
+- Authentication, profile avatar, passkeys, and 2FA.
+- Installable PWA with offline fallback and mobile-first navigation.
 
 ## Running locally
 
@@ -69,3 +70,7 @@ docker compose --env-file .env.production -f compose.production.yml up -d
 The `app` image already contains PHP/vendor/frontend build and the `web` image contains the public assets, so deploys do not depend on the host's `vendor`, `node_modules`, or `public/build`. Set up TLS on the reverse proxy and schedule PostgreSQL backups before going live.
 
 Technical decision details are available in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
+## License
+
+Released under the [MIT License](LICENSE).

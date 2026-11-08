@@ -1,69 +1,70 @@
 // Components
 import { Form, Head } from '@inertiajs/react';
-import { LoaderCircle } from 'lucide-react';
-import InputError from '@/components/input-error';
+import { Field } from '@/components/finance/kit';
 import TextLink from '@/components/text-link';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import { Spinner } from '@/components/ui/spinner';
+import { t } from '@/lib/i18n';
 import { login } from '@/routes';
 import { email } from '@/routes/password';
 
 export default function ForgotPassword({ status }: { status?: string }) {
     return (
         <>
-            <Head title="Forgot password" />
+            <Head title={t('Lupa password')} />
 
             {status && (
-                <div className="mb-4 text-center text-sm font-medium text-green-600">
+                <p
+                    role="status"
+                    className="bg-masuk-wash text-masuk mb-6 rounded-xl px-4 py-3 text-sm font-medium"
+                >
                     {status}
-                </div>
+                </p>
             )}
 
-            <div className="space-y-6">
-                <Form {...email.form()}>
+            <div className="flex flex-col gap-6">
+                <Form {...email.form()} className="flex flex-col gap-5">
                     {({ processing, errors }) => (
                         <>
-                            <div className="grid gap-2">
-                                <Label htmlFor="email">Email address</Label>
-                                <Input
+                            <Field
+                                label={t('Email')}
+                                htmlFor="email"
+                                error={errors.email}
+                            >
+                                <input
                                     id="email"
                                     type="email"
                                     name="email"
+                                    className="field"
                                     autoComplete="off"
                                     autoFocus
-                                    placeholder="email@example.com"
+                                    placeholder="email@contoh.com"
+                                    aria-invalid={!!errors.email}
                                 />
+                            </Field>
 
-                                <InputError message={errors.email} />
-                            </div>
-
-                            <div className="my-6 flex items-center justify-start">
-                                <Button
-                                    className="w-full"
-                                    disabled={processing}
-                                    data-test="email-password-reset-link-button"
-                                >
-                                    {processing && (
-                                        <LoaderCircle className="h-4 w-4 animate-spin" />
-                                    )}
-                                    Email password reset link
-                                </Button>
-                            </div>
+                            <button
+                                type="submit"
+                                disabled={processing}
+                                data-test="email-password-reset-link-button"
+                                className="btn-kuning inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl px-5 text-base disabled:opacity-45"
+                            >
+                                {processing && <Spinner />}
+                                {t('Kirim link reset password')}
+                            </button>
                         </>
                     )}
                 </Form>
 
-                <div className="text-muted-foreground space-x-1 text-center text-sm">
-                    <span>Or, return to</span>
-                    <TextLink href={login()}>log in</TextLink>
-                </div>
+                <p className="text-muted-foreground text-center text-sm">
+                    {t('Inget lagi?')}{' '}
+                    <TextLink href={login()}>{t('Balik ke halaman masuk')}</TextLink>
+                </p>
             </div>
         </>
     );
 }
 
 ForgotPassword.layout = {
-    title: 'Forgot password',
-    description: 'Enter your email to receive a password reset link',
+    title: t('Lupa password'),
+    description: t('Masukin email lo, kita kirim link buat bikin password baru'),
 };

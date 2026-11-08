@@ -1,11 +1,9 @@
 import { Form, Head } from '@inertiajs/react';
-import InputError from '@/components/input-error';
+import { Field } from '@/components/finance/kit';
 import PasswordInput from '@/components/password-input';
 import TextLink from '@/components/text-link';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Spinner } from '@/components/ui/spinner';
+import { t } from '@/lib/i18n';
 import { login } from '@/routes';
 import { store } from '@/routes/register';
 
@@ -16,7 +14,7 @@ type Props = {
 export default function Register({ passwordRules }: Props) {
     return (
         <>
-            <Head title="Register" />
+            <Head title={t('Daftar')} />
             <Form
                 {...store.form()}
                 resetOnSuccess={['password', 'password_confirmation']}
@@ -25,88 +23,94 @@ export default function Register({ passwordRules }: Props) {
             >
                 {({ processing, errors }) => (
                     <>
-                        <div className="grid gap-6">
-                            <div className="grid gap-2">
-                                <Label htmlFor="name">Name</Label>
-                                <Input
+                        <div className="flex flex-col gap-5">
+                            <Field
+                                label={t('Nama')}
+                                htmlFor="name"
+                                error={errors.name}
+                            >
+                                <input
                                     id="name"
                                     type="text"
+                                    className="field"
                                     required
                                     autoFocus
                                     tabIndex={1}
                                     autoComplete="name"
                                     name="name"
-                                    placeholder="Full name"
+                                    placeholder={t('Nama lengkap')}
+                                    aria-invalid={!!errors.name}
                                 />
-                                <InputError
-                                    message={errors.name}
-                                    className="mt-2"
-                                />
-                            </div>
+                            </Field>
 
-                            <div className="grid gap-2">
-                                <Label htmlFor="email">Email address</Label>
-                                <Input
+                            <Field
+                                label={t('Email')}
+                                htmlFor="email"
+                                error={errors.email}
+                            >
+                                <input
                                     id="email"
                                     type="email"
+                                    className="field"
                                     required
                                     tabIndex={2}
                                     autoComplete="email"
                                     name="email"
-                                    placeholder="email@example.com"
+                                    placeholder="email@contoh.com"
+                                    aria-invalid={!!errors.email}
                                 />
-                                <InputError message={errors.email} />
-                            </div>
+                            </Field>
 
-                            <div className="grid gap-2">
-                                <Label htmlFor="password">Password</Label>
+                            <Field
+                                label={t('Password')}
+                                htmlFor="password"
+                                error={errors.password}
+                            >
                                 <PasswordInput
                                     id="password"
                                     required
                                     tabIndex={3}
                                     autoComplete="new-password"
                                     name="password"
-                                    placeholder="Password"
                                     passwordrules={passwordRules}
+                                    aria-invalid={!!errors.password}
                                 />
-                                <InputError message={errors.password} />
-                            </div>
+                            </Field>
 
-                            <div className="grid gap-2">
-                                <Label htmlFor="password_confirmation">
-                                    Confirm password
-                                </Label>
+                            <Field
+                                label={t('Ulangi password')}
+                                htmlFor="password_confirmation"
+                                error={errors.password_confirmation}
+                            >
                                 <PasswordInput
                                     id="password_confirmation"
                                     required
                                     tabIndex={4}
                                     autoComplete="new-password"
                                     name="password_confirmation"
-                                    placeholder="Confirm password"
                                     passwordrules={passwordRules}
+                                    aria-invalid={!!errors.password_confirmation}
                                 />
-                                <InputError
-                                    message={errors.password_confirmation}
-                                />
-                            </div>
+                            </Field>
 
-                            <Button
+                            <button
                                 type="submit"
-                                className="mt-2 w-full"
                                 tabIndex={5}
+                                disabled={processing}
                                 data-test="register-user-button"
+                                className="btn-kuning mt-1 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl px-5 text-base disabled:opacity-45"
                             >
                                 {processing && <Spinner />}
-                                Create account
-                            </Button>
+                                {t('Bikin akun')}
+                            </button>
                         </div>
 
-                        <div className="text-muted-foreground text-center text-sm">
-                            Already have an account?{' '}
+                        <p className="text-muted-foreground text-center text-sm">
+                            {t('Udah punya akun?')}{' '}
                             <TextLink href={login()} tabIndex={6}>
-                                Log in
+                                {t('Masuk')}
                             </TextLink>
-                        </div>
+                        </p>
                     </>
                 )}
             </Form>
@@ -115,6 +119,6 @@ export default function Register({ passwordRules }: Props) {
 }
 
 Register.layout = {
-    title: 'Create an account',
-    description: 'Enter your details below to create your account',
+    title: t('Bikin akun DompetKu'),
+    description: t('Gratis. Isi data di bawah, langsung bisa nyatet.'),
 };

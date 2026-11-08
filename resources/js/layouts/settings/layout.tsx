@@ -1,10 +1,10 @@
 import { Link } from '@inertiajs/react';
 import { Palette, ShieldCheck, UserRound } from 'lucide-react';
 import type { PropsWithChildren } from 'react';
-import { PageHeading } from '@/components/finance/page-heading';
+import { Page, PageHeader } from '@/components/finance/kit';
 import { useCurrentUrl } from '@/hooks/use-current-url';
-import { cn } from '@/lib/utils';
 import { t } from '@/lib/i18n';
+import { cn } from '@/lib/utils';
 import { edit as editAppearance } from '@/routes/appearance';
 import { edit } from '@/routes/profile';
 import { edit as editSecurity } from '@/routes/security';
@@ -16,46 +16,42 @@ export default function SettingsLayout({ children }: PropsWithChildren) {
         { title: t('Keamanan'), href: editSecurity(), icon: ShieldCheck },
         { title: t('Tampilan'), href: editAppearance(), icon: Palette },
     ];
+
     return (
-        <main
-            id="main-content"
-            className="finance-page flex flex-1 flex-col gap-7 p-4 md:p-6 lg:p-8"
-        >
-            <PageHeading
-                eyebrow={t('Personal space')}
+        <Page>
+            <PageHeader
                 title={t('Pengaturan')}
                 description={t('Kelola profil dan pengaturan akun lo')}
             />
-            <div className="grid items-start gap-6 lg:grid-cols-[200px_1fr]">
+            <div className="grid items-start gap-6 lg:grid-cols-12 lg:gap-8">
                 <nav
-                    className="bg-muted grid grid-cols-3 gap-1 rounded-2xl p-1.5 lg:grid-cols-1"
                     aria-label={t('Pengaturan')}
+                    className="scroll-x -mx-4 gap-2 px-4 sm:-mx-6 sm:px-6 lg:sticky lg:top-9 lg:col-span-3 lg:mx-0 lg:flex-col lg:overflow-visible lg:px-0"
                 >
-                    {items.map((item) => (
-                        <Link
-                            key={item.title}
-                            href={item.href}
-                            aria-current={
-                                isCurrentOrParentUrl(item.href)
-                                    ? 'page'
-                                    : undefined
-                            }
-                            className={cn(
-                                'flex min-h-12 items-center justify-center gap-2 rounded-xl px-2 text-xs font-medium transition-colors lg:justify-start lg:px-4 lg:text-sm',
-                                isCurrentOrParentUrl(item.href)
-                                    ? 'bg-card text-foreground shadow-xs'
-                                    : 'text-muted-foreground hover:text-foreground',
-                            )}
-                        >
-                            <item.icon className="size-4 shrink-0" />
-                            {item.title}
-                        </Link>
-                    ))}
+                    {items.map((item) => {
+                        const active = isCurrentOrParentUrl(item.href);
+                        return (
+                            <Link
+                                key={item.title}
+                                href={item.href}
+                                prefetch
+                                aria-current={active ? 'page' : undefined}
+                                data-active={active}
+                                className={cn(
+                                    'chip min-h-11 shrink-0 lg:w-full lg:justify-start lg:px-4 lg:text-sm',
+                                    !active && 'lg:border-transparent lg:bg-transparent',
+                                )}
+                            >
+                                <item.icon className="size-4 shrink-0" aria-hidden="true" />
+                                {item.title}
+                            </Link>
+                        );
+                    })}
                 </nav>
-                <div className="surface max-w-3xl min-w-0">
-                    <section className="space-y-10 sm:p-3">{children}</section>
+                <div className="flex max-w-3xl min-w-0 flex-col gap-6 lg:col-span-9">
+                    {children}
                 </div>
             </div>
-        </main>
+        </Page>
     );
 }

@@ -1,10 +1,8 @@
 import { Form, Head } from '@inertiajs/react';
-import InputError from '@/components/input-error';
+import { Field } from '@/components/finance/kit';
 import PasswordInput from '@/components/password-input';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Spinner } from '@/components/ui/spinner';
+import { t } from '@/lib/i18n';
 import { update } from '@/routes/password';
 
 type Props = {
@@ -16,7 +14,7 @@ type Props = {
 export default function ResetPassword({ token, email, passwordRules }: Props) {
     return (
         <>
-            <Head title="Reset password" />
+            <Head title={t('Reset password')} />
 
             <Form
                 {...update.form()}
@@ -24,65 +22,61 @@ export default function ResetPassword({ token, email, passwordRules }: Props) {
                 resetOnSuccess={['password', 'password_confirmation']}
             >
                 {({ processing, errors }) => (
-                    <div className="grid gap-6">
-                        <div className="grid gap-2">
-                            <Label htmlFor="email">Email</Label>
-                            <Input
+                    <div className="flex flex-col gap-5">
+                        <Field
+                            label={t('Email')}
+                            htmlFor="email"
+                            error={errors.email}
+                        >
+                            <input
                                 id="email"
                                 type="email"
                                 name="email"
                                 autoComplete="email"
                                 value={email}
-                                className="mt-1 block w-full"
+                                className="field bg-sunken text-muted-foreground"
                                 readOnly
                             />
-                            <InputError
-                                message={errors.email}
-                                className="mt-2"
-                            />
-                        </div>
+                        </Field>
 
-                        <div className="grid gap-2">
-                            <Label htmlFor="password">Password</Label>
+                        <Field
+                            label={t('Password baru')}
+                            htmlFor="password"
+                            error={errors.password}
+                        >
                             <PasswordInput
                                 id="password"
                                 name="password"
                                 autoComplete="new-password"
-                                className="mt-1 block w-full"
                                 autoFocus
-                                placeholder="Password"
                                 passwordrules={passwordRules}
+                                aria-invalid={!!errors.password}
                             />
-                            <InputError message={errors.password} />
-                        </div>
+                        </Field>
 
-                        <div className="grid gap-2">
-                            <Label htmlFor="password_confirmation">
-                                Confirm password
-                            </Label>
+                        <Field
+                            label={t('Ulangi password baru')}
+                            htmlFor="password_confirmation"
+                            error={errors.password_confirmation}
+                        >
                             <PasswordInput
                                 id="password_confirmation"
                                 name="password_confirmation"
                                 autoComplete="new-password"
-                                className="mt-1 block w-full"
-                                placeholder="Confirm password"
                                 passwordrules={passwordRules}
+                                aria-invalid={!!errors.password_confirmation}
                             />
-                            <InputError
-                                message={errors.password_confirmation}
-                                className="mt-2"
-                            />
-                        </div>
+                        </Field>
 
-                        <Button
+                        <button
                             type="submit"
-                            className="mt-4 w-full"
                             disabled={processing}
                             data-test="reset-password-button"
+                            className="btn-kuning mt-1 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl px-5 text-base disabled:opacity-45"
                         >
                             {processing && <Spinner />}
-                            Reset password
-                        </Button>
+                            {t('Simpan password baru')}
+                        </button>
                     </div>
                 )}
             </Form>
@@ -91,6 +85,6 @@ export default function ResetPassword({ token, email, passwordRules }: Props) {
 }
 
 ResetPassword.layout = {
-    title: 'Reset password',
-    description: 'Please enter your new password below',
+    title: t('Bikin password baru'),
+    description: t('Ketik password baru lo di bawah'),
 };

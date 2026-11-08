@@ -1,26 +1,24 @@
 import { Head } from '@inertiajs/react';
 import AppearanceTabs from '@/components/appearance-tabs';
 import Heading from '@/components/heading';
-import { edit as editAppearance } from '@/routes/appearance';
 import { t } from '@/lib/i18n';
+import { edit as editAppearance } from '@/routes/appearance';
 
 export default function Appearance() {
     return (
         <>
             <Head title={t('Pengaturan tampilan')} />
 
-            <h1 className="sr-only">{t('Pengaturan tampilan')}</h1>
-
-            <div className="space-y-6">
+            <section className="plank flex flex-col gap-5 p-5 sm:p-6">
                 <Heading
                     variant="small"
-                    title={t('Pengaturan tampilan')}
+                    title={t('Tema')}
                     description={t(
                         'Pilih tema terang, gelap, atau ikuti sistem perangkat',
                     )}
                 />
                 <AppearanceTabs />
-            </div>
+            </section>
         </>
     );
 }

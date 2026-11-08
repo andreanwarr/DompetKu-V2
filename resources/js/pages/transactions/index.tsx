@@ -1,939 +1,287 @@
-import { Head, Link, router, useForm } from '@inertiajs/react';
-import {
-    ArrowDownLeft,
-    ArrowLeft,
-    ArrowRightLeft,
-    ArrowUpRight,
-    CalendarDays,
-    ChevronDown,
-    ChevronLeft,
-    ChevronRight,
-    Pencil,
-    Send,
-    Trash2,
-} from 'lucide-react';
+import { Head, Link, router } from '@inertiajs/react';
+import { ChevronLeft, ChevronRight, Plus, ReceiptText, SearchX, Trash2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import { DetailDialog } from '@/components/finance/detail-dialog';
-import {
-    PageHeading,
-    selectClass,
-    textareaClass,
-} from '@/components/finance/page-heading';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import {
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogHeader,
-    DialogTitle,
-} from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { rupiah, shortDate } from '@/lib/format';
+import { EmptyState, Page, PageHeader, Panel } from '@/components/finance/kit';
+import { Money } from '@/components/finance/money';
+import { useQuickEntry } from '@/components/quick-entry';
+import { dayLabel, monthLabel, rupiah, shiftMonth, shortDate } from '@/lib/format';
+import { entryType, flowClass, flowSign, type Category, type FundSource } from '@/lib/finance';
 import { t } from '@/lib/i18n';
+import { cn } from '@/lib/utils';
 
-type Source = { id: number; name: string };
-type Category = { id: number; name: string; type: 'income' | 'expense' };
 type Entry = {
     id: string;
     type: string;
     amount: number;
     date: string;
-    description?: string;
-    counterparty?: string;
-    fund_source_id?: number;
-    category_id?: number;
+    description?: string | null;
+    counterparty?: string | null;
+    fund_source_id?: number | null;
+    from_fund_source_id?: number | null;
+    category_id?: number | null;
     is_recurring?: boolean;
 };
 type Props = {
-    transactions: { data: Entry[]; total?: number; from?: number; to?: number; last_page?: number; current_page?: number; links?: { url: string | null; label: string; active: boolean }[] };
+    transactions: {
+        data: Entry[];
+        total: number;
+        current_page: number;
+        last_page: number;
+        prev_page_url: string | null;
+        next_page_url: string | null;
+    };
+    totals: { income: number; expense: number };
     filters: { month: string; from: string; to: string; type: string | null; category: number };
-    fundSources: Source[];
+    fundSources: FundSource[];
     categories: Category[];
 };
 
-// crypto.randomUUID cuma ada di secure context (https/localhost); .test tidak
-const newIdempotencyKey = () =>
-    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-        ? crypto.randomUUID()
-        : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-              const r = (Math.random() * 16) | 0;
-              return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
-          });
+export default function Transactions({ transactions, totals, filters, fundSources, categories }: Props) {
+    const openEntry = useQuickEntry();
+    const [detail, setDetail] = useState<Entry | null>(null);
+    const [confirm, setConfirm] = useState(false);
+    const sourceName = useMemo(() => new Map(fundSources.map((s) => [s.id, s.name])), [fundSources]);
+    const categoryOf = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories]);
 
-export default function Transactions({
-    transactions,
-    filters,
-    fundSources,
-    categories,
-}: Props) {
-    const fromDashboard = new URLSearchParams(window.location.search).get('from') === 'dashboard';
-    const applyFilter = (params: Record<string, string>) => {
-        router.get('/transactions', fromDashboard ? { ...params, from: 'dashboard' } : params, { preserveScroll: true, preserveState: true });
+    const monthStart = `${filters.month}-01`;
+    const customRange = filters.from !== monthStart || filters.to.slice(0, 7) !== filters.month;
+    const query = (patch: Record<string, string | number | null>) => {
+        const params = new URLSearchParams();
+        const merged = { month: filters.month, type: filters.type, category: filters.category || null, ...patch };
+        Object.entries(merged).forEach(([k, v]) => v !== null && v !== '' && params.set(k, String(v)));
+        return `/transactions?${params.toString()}`;
     };
-    const monthOptions = useMemo(() => {
-        const list: { value: string; label: string }[] = [];
-        const nowMonth = new Date();
-        for (let i = 0; i < 24; i++) {
-            const d = new Date(nowMonth.getFullYear(), nowMonth.getMonth() - i, 1);
-            list.push({
-                value: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`,
-                label: new Intl.DateTimeFormat('id-ID', { month: 'long', year: 'numeric' }).format(d),
-            });
+
+    const groups = useMemo(() => {
+        const map = new Map<string, Entry[]>();
+        for (const entry of transactions.data) map.set(entry.date, [...(map.get(entry.date) ?? []), entry]);
+        return [...map.entries()];
+    }, [transactions.data]);
+
+    const open = (entry: Entry) => {
+        if (entry.type === 'income' || entry.type === 'expense') {
+            openEntry({ entry });
+        } else {
+            setConfirm(false);
+            setDetail(entry);
         }
-        return list;
-    }, []);
-    const localDate = () => {
-        const date = new Date();
-        const offset = date.getTimezoneOffset() * 60000;
-        return new Date(date.getTime() - offset).toISOString().slice(0, 10);
-    };
-    // tampil "10.000" di input, simpan digit mentah "10000" di state
-    const digitsToRupiah = (digits: string) =>
-        digits.replace(/\D/g, '').replace(/^0+(?=\d)/, '')
-            ? Number(digits.replace(/\D/g, '').replace(/^0+(?=\d)/, '')).toLocaleString('id-ID')
-            : '';
-    const [mode, setMode] = useState<'expense' | 'income'>('expense');
-    const [openCreate, setOpenCreate] = useState(
-        () => new URLSearchParams(window.location.search).get('new') === '1',
-    );
-    const [editing, setEditing] = useState<Entry | null>(null);
-    const [openEdit, setOpenEdit] = useState(false);
-    const [deleting, setDeleting] = useState<Entry | null>(null);
-    const form = useForm({
-        type: 'expense',
-        amount_minor: '',
-        fund_source_id: fundSources[0]?.id ?? '',
-        category_id: categories.find((c) => c.type === 'expense')?.id ?? '',
-        effective_date: localDate(),
-        description: '',
-        counterparty: '',
-        is_recurring: true,
-        idempotency_key: newIdempotencyKey(),
-        from_fund_source_id: '',
-        to_fund_source_id: '',
-    });
-    // default kategori mengikuti mode expense/income
-    const setMode2 = (next: 'expense' | 'income') => {
-        setMode(next);
-        const first = categories.find((c) => c.type === next);
-        if (first) form.setData('category_id', String(first.id));
-        form.clearErrors();
-    };
-    const visibleCategories = useMemo(
-        () => categories.filter((category) => category.type === mode),
-        [categories, mode],
-    );
-    const todayStr = localDate();
-    const [calOpen, setCalOpen] = useState(false);
-    const [calMonth, setCalMonth] = useState(() => {
-        const d = new Date();
-        return d.getFullYear() * 12 + d.getMonth();
-    });
-    const monthLabel = new Intl.DateTimeFormat('id-ID', {
-        month: 'long',
-        year: 'numeric',
-    }).format(new Date(Math.floor(calMonth / 12), calMonth % 12, 1));
-    const calendarDays = useMemo(() => {
-        const year = Math.floor(calMonth / 12);
-        const month = calMonth % 12;
-        const offset = (new Date(year, month, 1).getDay() + 6) % 7; // Senin dulu
-        const total = new Date(year, month + 1, 0).getDate();
-        const pad = (n: number) => String(n).padStart(2, '0');
-        return [
-            ...Array.from({ length: offset }, () => null),
-            ...Array.from({ length: total }, (_, i) => `${year}-${pad(month + 1)}-${pad(i + 1)}`),
-        ];
-    }, [calMonth]);
-    const submit = (event: React.FormEvent) => {
-        event.preventDefault();
-        form.transform((data) => ({
-            ...data,
-            type: mode,
-            amount_minor: Number(data.amount_minor),
-        }));
-        const options = {
-            preserveScroll: true,
-            onSuccess: () => {
-                form.reset('amount_minor', 'description', 'counterparty');
-                form.setData('idempotency_key', newIdempotencyKey());
-                setOpenCreate(false);
-            },
-        };
-        form.post('/transactions', options);
     };
 
-    // ── Edit transaksi ──
-    const openEditModal = (item: Entry) => {
-        setEditing(item);
-        setMode(item.type === 'income' ? 'income' : 'expense');
-        form.setData({
-            ...form.data,
-            type: item.type,
-            amount_minor: String(item.amount),
-            fund_source_id: item.fund_source_id ?? fundSources[0]?.id ?? '',
-            category_id: item.category_id ?? categories.find((c) => c.type === item.type)?.id ?? '',
-            effective_date: item.date,
-            description: item.description ?? '',
-            counterparty: item.counterparty ?? '',
-            is_recurring: item.is_recurring ?? true,
-        });
-        setOpenEdit(true);
-    };
-    const submitEdit = (event: React.FormEvent) => {
-        event.preventDefault();
-        if (!editing) return;
-        form.transform((data) => ({ ...data, type: mode, amount_minor: Number(data.amount_minor) }));
-        form.put(`/transactions/${editing.id}`, {
-            preserveScroll: true,
-            onSuccess: () => {
-                form.reset('amount_minor', 'description', 'counterparty');
-                form.setData('idempotency_key', newIdempotencyKey());
-                setEditing(null);
-                setOpenEdit(false);
-            },
-        });
+    const subtitle = (entry: Entry) => {
+        if (entry.type === 'transfer') {
+            return `${sourceName.get(entry.from_fund_source_id ?? 0) ?? '?'} → ${sourceName.get(entry.fund_source_id ?? 0) ?? '?'}`;
+        }
+        const parts = [categoryOf.get(entry.category_id ?? 0)?.name ?? entryType(entry.type).label, sourceName.get(entry.fund_source_id ?? 0)];
+        if (entry.type === 'income' && entry.is_recurring === false) parts.push(t('bonus'));
+        return parts.filter(Boolean).join(' · ');
     };
 
     return (
         <>
             <Head title={t('Transaksi')} />
-            <main
-                id="main-content"
-                className="finance-page flex flex-1 flex-col gap-6 p-4 md:p-6 lg:p-8"
-            >
-                {fromDashboard && (
-                    <Link
-                        href="/dashboard"
-                        className="text-muted-foreground hover:text-foreground inline-flex min-h-11 items-center gap-2 text-sm font-semibold"
-                    >
-                        <ArrowLeft className="size-4" />
-                        {t('Kembali ke Dashboard')}
-                    </Link>
-                )}
-                <PageHeading
-                    eyebrow={t('Arus kas')}
-                    title={t('Catat transaksi')}
-                    description={t(
-                        'Pemasukan dan pengeluaran memengaruhi laporan. Transfer hanya memindahkan saldo antar sumber dana.',
-                    )}
-                    action={
-                        <Button
-                            type="button"
-                            onClick={() => setOpenCreate(true)}
-                        >
-                            <Send className="size-4" />
-                            {t('Catat transaksi')}
-                        </Button>
+            <Page>
+                <PageHeader
+                    title={t('Transaksi')}
+                    actions={
+                        <button type="button" onClick={() => openEntry()} className="btn-kuning hidden min-h-11 items-center gap-2 rounded-xl px-4 text-sm lg:inline-flex">
+                            <Plus className="size-4" strokeWidth={2.5} /> {t('Catat')}
+                        </button>
                     }
-                />
-                <div className="flex flex-col gap-4">
-                    <Dialog open={openCreate} onOpenChange={setOpenCreate}>
-                        <DialogContent className="max-h-[90dvh] gap-0 overflow-y-auto p-0 sm:max-w-md">
-                            <DialogHeader className="border-b px-6 py-4 text-left">
-                                <DialogTitle>
-                                    {t('Catat transaksi')}
-                                </DialogTitle>
-                                <DialogDescription>
-                                    {t(
-                                        'Masukkan transaksi baru untuk memperbarui arus kas.',
-                                    )}
-                                </DialogDescription>
-                            </DialogHeader>
-                            <div className="px-6 pt-4">
-                                <div className="bg-muted grid grid-cols-2 gap-1 rounded-2xl p-1.5">
-                                    {(['expense', 'income'] as const).map(
-                                        (item) => (
-                                            <button
-                                                key={item}
-                                                type="button"
-                                                onClick={() => setMode2(item)}
-                                                aria-pressed={mode === item}
-                                                className={`min-h-11 rounded-xl px-1 text-sm font-semibold transition-colors ${mode === item ? 'bg-background shadow-sm' : 'text-muted-foreground'}`}
-                                            >
-                                                {item === 'expense'
-                                                    ? t('Pengeluaran')
-                                                    : t('Pemasukan')}
-                                            </button>
-                                        ),
-                                    )}
-                                </div>
-                            </div>
-                            <form
-                                onSubmit={submit}
-                                className="space-y-5 px-6 py-4"
-                            >
-                                <Field
-                                    label={t('Nominal')}
-                                    error={form.errors.amount_minor}
-                                >
-                                    <div className="space-y-2">
-                                        <Input
-                                            inputMode="numeric"
-                                            type="text"
-                                            min="1"
-                                            className="bg-muted/40 h-14 rounded-2xl text-2xl font-semibold tracking-tight tabular-nums"
-                                            value={digitsToRupiah(form.data.amount_minor)}
-                                            onChange={(e) =>
-                                                form.setData(
-                                                    'amount_minor',
-                                                    e.target.value.replace(/\D/g, ''),
-                                                )
-                                            }
-                                            placeholder="0"
-                                            required
-                                        />
-                                        <div className="flex flex-wrap gap-2">
-                                            {[
-                                                10000, 20000, 30000, 50000,
-                                                100000,
-                                            ].map((value) => (
-                                                <button
-                                                    key={value}
-                                                    type="button"
-                                                    onClick={() =>
-                                                        form.setData(
-                                                            'amount_minor',
-                                                            String(value),
-                                                        )
-                                                    }
-                                                    className={`min-h-9 rounded-lg border px-3 text-xs font-semibold transition-colors ${Number(form.data.amount_minor) === value ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:bg-accent hover:text-foreground'}`}
-                                                >
-                                                    Rp{value / 1000}rb
-                                                </button>
-                                            ))}
-                                        </div>
-                                    </div>
-                                </Field>
-                                <Field
-                                    label={t('Judul transaksi')}
-                                    error={form.errors.description}
-                                >
-                                    <Input
-                                        value={form.data.description}
-                                        onChange={(e) => form.setData('description', e.target.value)}
-                                        placeholder={t('Judul transaksi')}
-                                        className="h-12 rounded-2xl"
-                                        required
-                                    />
-                                </Field>
-                                <div className="grid gap-4 sm:grid-cols-2">
-                                    <Field
-                                        label={t('Sumber dana')}
-                                        error={form.errors.fund_source_id}
-                                    >
-                                        <select
-                                            className={selectClass}
-                                            value={form.data.fund_source_id}
-                                            onChange={(e) =>
-                                                form.setData(
-                                                    'fund_source_id',
-                                                    Number(e.target.value),
-                                                )
-                                            }
-                                            required
-                                        >
-                                            <option value="">
-                                                {t('Pilih sumber')}
-                                            </option>
-                                            {fundSources.map((source) => (
-                                                <option
-                                                    key={source.id}
-                                                    value={source.id}
-                                                >
-                                                    {source.name}
-                                                </option>
-                                            ))}
-                                        </select>
-                                    </Field>
-                                    <Field
-                                        label={t('Kategori')}
-                                        error={form.errors.category_id}
-                                    >
-                                        <select
-                                            className={selectClass}
-                                            value={form.data.category_id}
-                                            onChange={(e) =>
-                                                form.setData(
-                                                    'category_id',
-                                                    e.target.value,
-                                                )
-                                            }
-                                            required
-                                        >
-                                            <option value="">
-                                                {t('Pilih kategori')}
-                                            </option>
-                                            {visibleCategories.map(
-                                                (category) => (
-                                                    <option
-                                                        key={category.id}
-                                                        value={category.id}
-                                                    >
-                                                        {category.name}
-                                                    </option>
-                                                ),
-                                            )}
-                                        </select>
-                                    </Field>
-                                </div>
-                                <Field
-                                    label={t('Tanggal transaksi')}
-                                    error={form.errors.effective_date}
-                                >
-                                    <div className="space-y-2">
-                                        <button
-                                            type="button"
-                                            onClick={() => setCalOpen(!calOpen)}
-                                            aria-expanded={calOpen}
-                                            className={`border-input bg-muted/30 flex h-12 w-full items-center gap-3 rounded-2xl border px-4 text-left transition-colors hover:bg-muted/60 ${calOpen ? 'border-ring' : ''}`}
-                                        >
-                                            <CalendarDays className="text-muted-foreground size-4 shrink-0" />
-                                            <span className="flex-1 text-base">
-                                                {new Intl.DateTimeFormat(
-                                                    'id-ID',
-                                                    {
-                                                        weekday: 'long',
-                                                        day: 'numeric',
-                                                        month: 'long',
-                                                        year: 'numeric',
-                                                        timeZone: 'UTC',
-                                                    },
-                                                ).format(
-                                                    new Date(
-                                                        `${form.data.effective_date}T00:00:00Z`,
-                                                    ),
-                                                )}
-                                            </span>
-                                            <ChevronDown
-                                                className={`text-muted-foreground size-4 shrink-0 transition-transform ${calOpen ? 'rotate-180' : ''}`}
-                                            />
-                                        </button>
-                                        {calOpen && (
-                                            <div className="border-border bg-card rounded-2xl border p-3">
-                                                <div className="mb-1 flex items-center justify-between">
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => setCalMonth((m) => m - 1)}
-                                                        aria-label={t('Bulan sebelumnya')}
-                                                        className="hover:bg-accent text-muted-foreground grid size-10 place-items-center rounded-xl transition-colors"
-                                                    >
-                                                        <ChevronLeft className="size-4" />
-                                                    </button>
-                                                    <span className="text-sm font-semibold">
-                                                        {monthLabel}
-                                                    </span>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => setCalMonth((m) => m + 1)}
-                                                        aria-label={t('Bulan berikutnya')}
-                                                        className="hover:bg-accent text-muted-foreground grid size-10 place-items-center rounded-xl transition-colors"
-                                                    >
-                                                        <ChevronRight className="size-4" />
-                                                    </button>
-                                                </div>
-                                                <div className="grid grid-cols-7 gap-1 text-center">
-                                                    {['Sn', 'Sl', 'Rb', 'Km', 'Jm', 'Sb', 'Mg'].map((d) => (
-                                                        <span
-                                                            key={d}
-                                                            className="text-muted-foreground py-1.5 text-[11px] font-semibold"
-                                                        >
-                                                            {d}
-                                                        </span>
-                                                    ))}
-                                                    {calendarDays.map((day, i) =>
-                                                        day === null ? (
-                                                            <span key={`empty-${i}`} />
-                                                        ) : (
-                                                            <button
-                                                                key={day}
-                                                                type="button"
-                                                                onClick={() => {
-                                                                    form.setData('effective_date', day);
-                                                                    setCalOpen(false);
-                                                                }}
-                                                                className={
-                                                                    day === form.data.effective_date
-                                                                        ? 'lime-button min-h-10 rounded-xl text-sm font-semibold'
-                                                                        : day === todayStr
-                                                                          ? 'border-ring text-foreground min-h-10 rounded-xl border-2 text-sm font-semibold'
-                                                                          : 'hover:bg-accent min-h-10 rounded-xl text-sm'
-                                                                }
-                                                            >
-                                                                {Number(day.slice(8))}
-                                                            </button>
-                                                        ),
-                                                    )}
-                                                </div>
-                                                <div className="mt-2 flex gap-2">
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => {
-                                                            form.setData('effective_date', todayStr);
-                                                            setCalOpen(false);
-                                                        }}
-                                                        className="lime-button min-h-10 flex-1 rounded-xl text-sm font-semibold"
-                                                    >
-                                                        {t('Hari ini')}
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => setCalOpen(false)}
-                                                        className="hover:bg-accent text-muted-foreground min-h-10 flex-1 rounded-xl text-sm font-medium"
-                                                    >
-                                                        {t('Tutup')}
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        )}
-                                    </div>
-                                </Field>
-                                {mode === 'income' && (
-                                    <label className="border-border flex items-center gap-3 rounded-2xl border p-3 text-sm">
-                                        <input type="checkbox" className="size-4" checked={form.data.is_recurring} onChange={(e) => form.setData('is_recurring', e.target.checked)} />
-                                        <span className="flex-1">{t('Pemasukan rutin')}<span className="text-muted-foreground block text-xs">{t('Nonaktifkan untuk bonus/THR — tidak dihitung dalam patokan bulanan.')}</span></span>
-                                    </label>
-                                )}
-                                <Field
-                                    label={t('Catatan')}
-                                    error={form.errors.counterparty}
-                                >
-                                    <textarea
-                                        className={textareaClass}
-                                        value={form.data.counterparty}
-                                        onChange={(e) =>
-                                            form.setData(
-                                                'counterparty',
-                                                e.target.value,
-                                            )
-                                        }
-                                        placeholder={t('Opsional')}
-                                        rows={2}
-                                    />
-                                </Field>
-                                <div className="bg-background sticky bottom-0 -mx-6 border-t px-6 pt-4 pb-6">
-                                    <Button
-                                        className="bg-primary hover:bg-primary/90 min-h-11 w-full"
-                                        disabled={
-                                            form.processing ||
-                                            fundSources.length === 0
-                                        }
-                                    >
-                                        {form.processing ? (
-                                            t('Menyimpan…')
-                                        ) : (
-                                            <>
-                                                <Send /> {t('Simpan transaksi')}
-                                            </>
-                                        )}
-                                    </Button>
-                                    {fundSources.length === 0 && (
-                                        <p className="mt-2 text-center text-xs text-amber-700 dark:text-amber-400">
-                                            {t(
-                                                'Tambahkan sumber dana terlebih dahulu.',
-                                            )}
-                                        </p>
-                                    )}
-                                </div>
-                            </form>
-                        </DialogContent>
-                    </Dialog>
-                    <Dialog open={openEdit} onOpenChange={setOpenEdit}>
-                        <DialogContent className="max-h-[90dvh] gap-0 overflow-y-auto p-0 sm:max-w-md">
-                            <DialogHeader className="border-b px-6 py-4 text-left">
-                                <DialogTitle>{t('Ubah transaksi')}</DialogTitle>
-                                <DialogDescription>
-                                    {editing?.description}
-                                </DialogDescription>
-                            </DialogHeader>
-                            <div className="px-6 pt-4">
-                                <div className="bg-muted grid grid-cols-2 gap-1 rounded-2xl p-1.5">
-                                    {(['expense', 'income'] as const).map(
-                                        (item) => (
-                                            <button
-                                                key={item}
-                                                type="button"
-                                                onClick={() => setMode2(item)}
-                                                aria-pressed={mode === item}
-                                                className={`min-h-11 rounded-xl px-1 text-sm font-semibold transition-colors ${mode === item ? 'bg-background shadow-sm' : 'text-muted-foreground'}`}
-                                            >
-                                                {item === 'expense'
-                                                    ? t('Pengeluaran')
-                                                    : t('Pemasukan')}
-                                            </button>
-                                        ),
-                                    )}
-                                </div>
-                            </div>
-                            <form
-                                onSubmit={submitEdit}
-                                className="space-y-5 px-6 py-4"
-                            >
-                                <Field
-                                    label={t('Nominal')}
-                                    error={form.errors.amount_minor}
-                                >
-                                    <div className="space-y-2">
-                                        <Input
-                                            inputMode="numeric"
-                                            type="text"
-                                            className="bg-muted/40 h-14 rounded-2xl text-2xl font-semibold tracking-tight tabular-nums"
-                                            value={digitsToRupiah(form.data.amount_minor)}
-                                            onChange={(e) =>
-                                                form.setData(
-                                                    'amount_minor',
-                                                    e.target.value.replace(/\D/g, ''),
-                                                )
-                                            }
-                                            placeholder="0"
-                                            required
-                                        />
-                                    </div>
-                                </Field>
-                                <Field
-                                    label={t('Judul transaksi')}
-                                    error={form.errors.description}
-                                >
-                                    <Input
-                                        value={form.data.description}
-                                        onChange={(e) => form.setData('description', e.target.value)}
-                                        className="h-12 rounded-2xl"
-                                        required
-                                    />
-                                </Field>
-                                <div className="grid gap-4 sm:grid-cols-2">
-                                    <Field
-                                        label={t('Sumber dana')}
-                                        error={form.errors.fund_source_id}
-                                    >
-                                        <select
-                                            className={selectClass}
-                                            value={form.data.fund_source_id}
-                                            onChange={(e) =>
-                                                form.setData('fund_source_id', Number(e.target.value))
-                                            }
-                                            required
-                                        >
-                                            {fundSources.map((source) => (
-                                                <option key={source.id} value={source.id}>
-                                                    {source.name}
-                                                </option>
-                                            ))}
-                                        </select>
-                                    </Field>
-                                    <Field
-                                        label={t('Kategori')}
-                                        error={form.errors.category_id}
-                                    >
-                                        <select
-                                            className={selectClass}
-                                            value={form.data.category_id}
-                                            onChange={(e) =>
-                                                form.setData('category_id', e.target.value)
-                                            }
-                                            required
-                                        >
-                                            {visibleCategories.map((category) => (
-                                                <option key={category.id} value={category.id}>
-                                                    {category.name}
-                                                </option>
-                                            ))}
-                                        </select>
-                                    </Field>
-                                </div>
-                                <Field
-                                    label={t('Tanggal transaksi')}
-                                    error={form.errors.effective_date}
-                                >
-                                    <Input
-                                        type="date"
-                                        value={form.data.effective_date}
-                                        onChange={(e) =>
-                                            form.setData('effective_date', e.target.value)
-                                        }
-                                        required
-                                    />
-                                </Field>
-                                {mode === 'income' && (
-                                    <label className="border-border flex items-center gap-3 rounded-2xl border p-3 text-sm">
-                                        <input type="checkbox" className="size-4" checked={form.data.is_recurring} onChange={(e) => form.setData('is_recurring', e.target.checked)} />
-                                        <span className="flex-1">{t('Pemasukan rutin')}<span className="text-muted-foreground block text-xs">{t('Nonaktifkan untuk bonus/THR — tidak dihitung dalam patokan bulanan.')}</span></span>
-                                    </label>
-                                )}
-                                <Field
-                                    label={t('Catatan')}
-                                    error={form.errors.counterparty}
-                                >
-                                    <textarea
-                                        className={textareaClass}
-                                        value={form.data.counterparty}
-                                        onChange={(e) =>
-                                            form.setData('counterparty', e.target.value)
-                                        }
-                                        rows={2}
-                                    />
-                                </Field>
-                                <div className="bg-background sticky bottom-0 -mx-6 border-t px-6 pt-4 pb-6">
-                                    <Button
-                                        className="bg-primary hover:bg-primary/90 min-h-11 w-full"
-                                        disabled={form.processing}
-                                    >
-                                        {form.processing ? t('Menyimpan…') : t('Simpan perubahan')}
-                                    </Button>
-                                </div>
-                            </form>
-                        </DialogContent>
-                    </Dialog>
-                    <Dialog open={deleting !== null} onOpenChange={(open) => !open && setDeleting(null)}>
-                        <DialogContent className="sm:max-w-sm">
-                            <DialogHeader>
-                                <DialogTitle>{t('Hapus transaksi?')}</DialogTitle>
-                                <DialogDescription>
-                                    {deleting
-                                        ? `${deleting.description ?? ''} · ${rupiah(deleting.amount)} · ${shortDate(deleting.date)}. ${t('Tidak bisa dibatalkan.')}`
-                                        : ''}
-                                </DialogDescription>
-                            </DialogHeader>
-                            <div className="flex gap-2">
-                                <Button variant="outline" className="flex-1" onClick={() => setDeleting(null)}>
-                                    {t('Batal')}
-                                </Button>
-                                <Button
-                                    variant="destructive"
-                                    className="flex-1"
-                                    disabled={form.processing}
-                                    onClick={() => {
-                                        if (!deleting) return;
-                                        router.delete(`/transactions/${deleting.id}`, {
-                                            preserveScroll: true,
-                                            onSuccess: () => setDeleting(null),
-                                        });
-                                    }}
-                                >
-                                    <Trash2 /> {t('Hapus')}
-                                </Button>
-                            </div>
-                        </DialogContent>
-                    </Dialog>
-                    <Card className="border-border shadow-none">
-                        <CardHeader className="flex-row items-center justify-between border-b pb-5">
-                            <CardTitle>{t('Riwayat transaksi')}</CardTitle>
-                            <span className="bg-muted rounded-full px-3 py-1 text-xs font-medium tabular-nums">
-                                {transactions.total ?? transactions.data.length} {t('transaksi')}
+                >
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="flex items-center gap-1">
+                            <Link href={query({ month: shiftMonth(filters.month, -1) })} prefetch preserveScroll aria-label={t('Bulan sebelumnya')} className="hover:bg-sunken grid size-10 place-items-center rounded-full">
+                                <ChevronLeft className="size-5" />
+                            </Link>
+                            <span className="font-display min-w-40 text-center text-xl font-bold capitalize">
+                                {customRange ? `${shortDate(filters.from)} – ${shortDate(filters.to)}` : monthLabel(filters.month)}
                             </span>
-                        </CardHeader>
-                        <CardContent>
-                            <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                                <select
-                                    aria-label={t('Bulan')}
-                                    className={selectClass}
-                                    value={filters.month}
-                                    onChange={(e) => applyFilter({ month: e.target.value, type: filters.type ?? '', category: String(filters.category || '') })}
-                                >
-                                    {monthOptions.map((m) => (
-                                        <option key={m.value} value={m.value}>{m.label}</option>
-                                    ))}
-                                </select>
-                                <select
-                                    aria-label={t('Jenis')}
-                                    className={selectClass}
-                                    value={filters.type ?? ''}
-                                    onChange={(e) => applyFilter({ month: filters.month, type: e.target.value, category: String(filters.category || '') })}
-                                >
-                                    <option value="">{t('Semua jenis')}</option>
-                                    <option value="income">{t('Pemasukan')}</option>
-                                    <option value="expense">{t('Pengeluaran')}</option>
-                                    <option value="transfer">{t('Transfer')}</option>
-                                </select>
-                                <select
-                                    aria-label={t('Kategori')}
-                                    className={selectClass}
-                                    value={String(filters.category || '')}
-                                    onChange={(e) => applyFilter({ month: filters.month, type: filters.type ?? '', category: e.target.value })}
-                                >
-                                    <option value="">{t('Semua kategori')}</option>
-                                    {categories.map((c) => (
-                                        <option key={c.id} value={c.id}>{c.name}</option>
-                                    ))}
-                                </select>
-                            </div>
-                            {transactions.data.length === 0 ? (
-                                <p className="empty-state">
-                                    {t('Belum ada transaksi tercatat.')}
-                                </p>
-                            ) : (
-                                <div className="divide-y">
-                                    {transactions.data.map((item) => {
-                                        const income = item.type === 'income';
-                                        const transfer =
-                                            item.type === 'transfer';
-                                        const title =
-                                            item.description ||
-                                            item.counterparty ||
-                                            (transfer
-                                                ? t('Transfer dana')
-                                                : income
-                                                  ? t('Pemasukan')
-                                                  : t('Pengeluaran'));
-                                        const typeLabel = income
-                                            ? t('Pemasukan')
-                                            : item.type === 'expense'
-                                              ? t('Pengeluaran')
-                                              : t('Transfer');
-                                        return (
-                                            <DetailDialog
-                                                key={item.id}
-                                                title={title}
-                                                description={shortDate(
-                                                    item.date,
-                                                )}
-                                                icon={
-                                                    income
-                                                        ? ArrowDownLeft
-                                                        : transfer
-                                                          ? ArrowRightLeft
-                                                          : ArrowUpRight
-                                                }
-                                                items={[
-                                                    {
-                                                        label: t('Jenis'),
-                                                        value: typeLabel,
-                                                    },
-                                                    {
-                                                        label: t('Tanggal'),
-                                                        value: shortDate(
-                                                            item.date,
-                                                        ),
-                                                    },
-                                                    {
-                                                        label: t('Nominal'),
-                                                        value: `${income ? '+' : item.type === 'expense' ? '−' : ''}${rupiah(item.amount)}`,
-                                                        tone: income
-                                                            ? 'positive'
-                                                            : item.type ===
-                                                                'expense'
-                                                              ? 'negative'
-                                                              : 'default',
-                                                    },
-                                                    ...(item.counterparty
-                                                        ? [
-                                                              {
-                                                                  label: t(
-                                                                      'Pihak / merchant',
-                                                                  ),
-                                                                  value: item.counterparty,
-                                                              },
-                                                          ]
-                                                        : []),
-                                                ]}
-                                                footer={
-                                                    !transfer ? (
-                                                        <div className="mt-4 flex w-full gap-2">
-                                                            <Button
-                                                                variant="outline"
-                                                                className="flex-1"
-                                                                onClick={() => openEditModal(item)}
-                                                            >
-                                                                <Pencil /> {t('Ubah transaksi')}
-                                                            </Button>
-                                                            <Button
-                                                                variant="outline"
-                                                                className="text-destructive hover:bg-destructive/10 flex-1"
-                                                                onClick={() => setDeleting(item)}
-                                                            >
-                                                                <Trash2 /> {t('Hapus')}
-                                                            </Button>
-                                                        </div>
-                                                    ) : undefined
-                                                }
-                                                trigger={
-                                                    <button
-                                                        type="button"
-                                                        className="group hover:bg-muted/60 focus-visible:ring-ring flex min-h-16 w-full items-center gap-3 rounded-xl px-2 py-4 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none"
-                                                    >
-                                                        <div
-                                                            className={`grid size-10 shrink-0 place-items-center rounded-xl ${income ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300' : transfer ? 'bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300' : 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300'}`}
-                                                        >
-                                                            {income ? (
-                                                                <ArrowDownLeft className="size-5" />
-                                                            ) : transfer ? (
-                                                                <ArrowRightLeft className="size-5" />
-                                                            ) : (
-                                                                <ArrowUpRight className="size-5" />
-                                                            )}
-                                                        </div>
-                                                        <div className="min-w-0 flex-1">
-                                                            <p className="truncate text-sm font-medium">
-                                                                {title}
-                                                            </p>
-                                                            <div className="mt-1 flex items-center gap-2">
-                                                                <span className="text-muted-foreground text-xs">
-                                                                    {shortDate(
-                                                                        item.date,
-                                                                    )}
-                                                                </span>
-                                                                <Badge
-                                                                    variant="outline"
-                                                                    className="text-[10px]"
-                                                                >
-                                                                    {typeLabel}
-                                                                </Badge>
-                                                            </div>
-                                                        </div>
-                                                        <span
-                                                            className={`shrink-0 text-xs font-semibold tabular-nums min-[380px]:text-sm ${income ? 'text-emerald-700 dark:text-emerald-400' : ''}`}
-                                                        >
-                                                            {income
-                                                                ? '+'
-                                                                : item.type ===
-                                                                    'expense'
-                                                                  ? '−'
-                                                                  : ''}
-                                                            {rupiah(
-                                                                item.amount,
-                                                            )}
+                            <Link href={query({ month: shiftMonth(filters.month, 1) })} prefetch preserveScroll aria-label={t('Bulan berikutnya')} className="hover:bg-sunken grid size-10 place-items-center rounded-full">
+                                <ChevronRight className="size-5" />
+                            </Link>
+                        </div>
+                        <div className="scroll-x -mx-4 gap-1.5 px-4 sm:mx-0 sm:px-0">
+                            {(
+                                [
+                                    [null, t('Semua')],
+                                    ['expense', t('Keluar')],
+                                    ['income', t('Masuk')],
+                                    ['transfer', t('Pindah')],
+                                ] as const
+                            ).map(([value, label]) => (
+                                <Link key={label} href={query({ type: value })} prefetch preserveScroll preserveState aria-current={filters.type === value ? 'true' : undefined} className="chip">
+                                    {label}
+                                </Link>
+                            ))}
+                            <select
+                                aria-label={t('Kategori')}
+                                value={String(filters.category || '')}
+                                onChange={(e) => router.get(query({ category: e.target.value || null }), {}, { preserveScroll: true, preserveState: true })}
+                                className={cn('chip appearance-none pr-3', filters.category ? 'border-foreground bg-foreground text-background' : '')}
+                            >
+                                <option value="">{t('Semua kategori')}</option>
+                                {categories.map((c) => (
+                                    <option key={c.id} value={c.id}>
+                                        {c.name}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+                    </div>
+                </PageHeader>
+
+                <dl className="plank grid grid-cols-3 divide-x divide-[var(--border)]">
+                    {[
+                        { label: t('Masuk'), value: totals.income, sign: '+' as const, tone: 'text-masuk' },
+                        { label: t('Keluar'), value: totals.expense, sign: '−' as const, tone: 'text-keluar' },
+                        { label: t('Selisih'), value: totals.income - totals.expense, sign: undefined, tone: '' },
+                    ].map((stat) => (
+                        <div key={stat.label} className="min-w-0 px-3 py-3.5 sm:px-5 sm:py-4">
+                            <dt className="label-caps">{stat.label}</dt>
+                            <dd className="mt-1.5 truncate">
+                                <Money value={stat.value} sign={stat.sign} className={cn('text-base sm:text-2xl', stat.tone)} />
+                            </dd>
+                        </div>
+                    ))}
+                </dl>
+
+                {transactions.data.length === 0 ? (
+                    filters.type || filters.category ? (
+                        <EmptyState
+                            icon={SearchX}
+                            title={t('Nggak ada yang cocok')}
+                            text={t('Coba ganti filter atau bulan.')}
+                            action={
+                                <Link href={query({ type: null, category: null })} className="chip">
+                                    {t('Hapus filter')}
+                                </Link>
+                            }
+                        />
+                    ) : (
+                        <EmptyState
+                            icon={ReceiptText}
+                            title={t('Bulan ini masih kosong')}
+                            text={t('Catat pengeluaran pertama, cuma butuh beberapa detik.')}
+                            action={
+                                <button type="button" onClick={() => openEntry()} className="btn-kuning inline-flex min-h-11 items-center gap-2 rounded-xl px-4 text-sm">
+                                    <Plus className="size-4" /> {t('Catat transaksi')}
+                                </button>
+                            }
+                        />
+                    )
+                ) : (
+                    <div className="flex flex-col gap-5">
+                        {groups.map(([date, entries]) => {
+                            const net = entries.reduce((sum, e) => {
+                                const flow = entryType(e.type).flow;
+                                return sum + (flow === 'in' ? e.amount : flow === 'out' ? -e.amount : 0);
+                            }, 0);
+                            return (
+                                <section key={date} aria-label={dayLabel(date)}>
+                                    <div className="bg-background/95 sticky top-0 z-10 flex items-baseline justify-between px-1 py-2 backdrop-blur-sm">
+                                        <h2 className="text-sm font-semibold capitalize">{dayLabel(date)}</h2>
+                                        {net !== 0 && <span className={cn('text-xs font-semibold tabular-nums', net > 0 ? 'text-masuk' : 'text-muted-foreground')}>{`${net > 0 ? '+' : '−'}${rupiah(Math.abs(net))}`}</span>}
+                                    </div>
+                                    <ul className="plank divide-border divide-y overflow-hidden">
+                                        {entries.map((entry) => {
+                                            const meta = entryType(entry.type);
+                                            const category = categoryOf.get(entry.category_id ?? 0);
+                                            return (
+                                                <li key={entry.id}>
+                                                    <button type="button" onClick={() => open(entry)} className="row-press flex min-h-14 w-full items-center gap-3 px-4 py-3 text-left">
+                                                        {category ? (
+                                                            <span className="size-2.5 shrink-0 rounded-full" style={{ background: category.color }} aria-hidden="true" />
+                                                        ) : (
+                                                            <meta.icon className="text-muted-foreground size-3.5 shrink-0" aria-hidden="true" />
+                                                        )}
+                                                        <span className="min-w-0 flex-1">
+                                                            <span className="block truncate text-[0.95rem] font-medium">{entry.description || entry.counterparty || meta.label}</span>
+                                                            <span className="text-muted-foreground block truncate text-xs">{subtitle(entry)}</span>
                                                         </span>
-                                                        <span className="text-primary hidden opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100 sm:block">
-                                                            ↗
-                                                        </span>
+                                                        <Money value={entry.amount} sign={flowSign(meta.flow) as '+' | '−' | ''} className={cn('text-lg', flowClass(meta.flow))} />
                                                     </button>
-                                                }
-                                            />
-                                        );
-                                    })}
+                                                </li>
+                                            );
+                                        })}
+                                    </ul>
+                                </section>
+                            );
+                        })}
+                        {transactions.last_page > 1 && (
+                            <nav aria-label={t('Halaman')} className="flex items-center justify-between gap-3">
+                                {transactions.prev_page_url ? (
+                                    <Link href={transactions.prev_page_url} preserveScroll={false} className="chip">
+                                        <ChevronLeft className="size-4" /> {t('Sebelumnya')}
+                                    </Link>
+                                ) : (
+                                    <span />
+                                )}
+                                <span className="text-muted-foreground text-sm tabular-nums">
+                                    {transactions.current_page} / {transactions.last_page}
+                                </span>
+                                {transactions.next_page_url ? (
+                                    <Link href={transactions.next_page_url} preserveScroll={false} className="chip">
+                                        {t('Berikutnya')} <ChevronRight className="size-4" />
+                                    </Link>
+                                ) : (
+                                    <span />
+                                )}
+                            </nav>
+                        )}
+                    </div>
+                )}
+            </Page>
+
+            <Panel open={detail !== null} onOpenChange={(o) => !o && setDetail(null)} title={detail ? detail.description || entryType(detail.type).label : ''} description={detail ? shortDate(detail.date) : undefined}
+                footer={
+                    detail && (
+                        <button
+                            type="button"
+                            onClick={() =>
+                                confirm
+                                    ? router.delete(`/transactions/${detail.id}`, { preserveScroll: true, onSuccess: () => setDetail(null) })
+                                    : setConfirm(true)
+                            }
+                            className={cn('inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border text-sm font-semibold', confirm ? 'border-keluar bg-keluar text-white' : 'text-keluar hover:bg-keluar-wash')}
+                        >
+                            <Trash2 className="size-4" /> {confirm ? t('Yakin hapus? Tidak bisa dibatalkan') : t('Hapus transaksi')}
+                        </button>
+                    )
+                }
+            >
+                {detail && (
+                    <>
+                        <Money value={detail.amount} sign={flowSign(entryType(detail.type).flow) as '+' | '−' | ''} className={cn('block text-4xl', flowClass(entryType(detail.type).flow))} />
+                        <dl className="plank divide-border mt-5 divide-y">
+                            {[
+                                [t('Jenis'), entryType(detail.type).label],
+                                [t('Tanggal'), shortDate(detail.date)],
+                                ...(detail.type === 'transfer'
+                                    ? [
+                                          [t('Dari'), sourceName.get(detail.from_fund_source_id ?? 0) ?? '—'],
+                                          [t('Ke'), sourceName.get(detail.fund_source_id ?? 0) ?? '—'],
+                                      ]
+                                    : [[t('Dompet'), sourceName.get(detail.fund_source_id ?? 0) ?? '—']]),
+                                ...(detail.counterparty ? [[t('Pihak / catatan'), detail.counterparty]] : []),
+                            ].map(([label, value]) => (
+                                <div key={label} className="flex justify-between gap-4 px-4 py-3 text-sm">
+                                    <dt className="text-muted-foreground">{label}</dt>
+                                    <dd className="text-right font-medium">{value}</dd>
                                 </div>
-                            )}
-                        </CardContent>
-                    </Card>
-                </div>
-            </main>
+                            ))}
+                        </dl>
+                        {detail.type !== 'transfer' && (
+                            <p className="text-muted-foreground mt-4 text-sm leading-relaxed">
+                                {t('Transaksi ini dicatat dari menu Tabungan atau Kasbon & Pinjaman. Menghapusnya membatalkan efeknya ke saldo.')}
+                            </p>
+                        )}
+                    </>
+                )}
+            </Panel>
         </>
     );
 }
 
-function Field({
-    label,
-    error,
-    children,
-}: {
-    label: string;
-    error?: string;
-    children: React.ReactNode;
-}) {
-    return (
-        <div className="space-y-2">
-            <Label>{label}</Label>
-            {children}
-            {error && (
-                <p role="alert" className="text-destructive text-xs">
-                    {error}
-                </p>
-            )}
-        </div>
-    );
-}
 Transactions.layout = {
     breadcrumbs: [{ title: t('Transaksi'), href: '/transactions' }],
 };

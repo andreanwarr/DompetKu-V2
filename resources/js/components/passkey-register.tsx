@@ -1,9 +1,9 @@
 import { usePasskeyRegister } from '@laravel/passkeys/react';
+import { Plus } from 'lucide-react';
 import { useState } from 'react';
+import { Field } from '@/components/finance/kit';
 import InputError from '@/components/input-error';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import { t } from '@/lib/i18n';
 
 type Props = {
     onSuccess: () => void;
@@ -58,50 +58,63 @@ export default function PasskeyRegistration({ onSuccess }: Props) {
 
     if (!isSupported) {
         return (
-            <div className="text-muted-foreground text-sm">
-                Passkeys are not supported in this browser.
-            </div>
+            <p className="text-muted-foreground text-sm">
+                {t('Browser ini belum dukung passkey.')}
+            </p>
         );
     }
 
     if (!showForm) {
         return (
-            <Button variant="outline" onClick={() => setShowForm(true)}>
-                Add passkey
-            </Button>
+            <button
+                type="button"
+                onClick={() => setShowForm(true)}
+                className="border-border bg-card hover:bg-sunken inline-flex min-h-11 w-fit items-center justify-center gap-2 rounded-xl border px-4 text-sm font-semibold transition-colors duration-150"
+            >
+                <Plus className="size-4" aria-hidden="true" />
+                {t('Tambah passkey')}
+            </button>
         );
     }
 
     return (
         <form
             onSubmit={handleSubmit}
-            className="border-border bg-muted/50 space-y-4 rounded-lg border p-4"
+            className="bg-sunken flex flex-col gap-4 rounded-xl p-4"
         >
-            <div className="grid gap-2">
-                <Label htmlFor="passkey-name">Passkey name</Label>
-                <Input
+            <Field
+                label={t('Nama passkey')}
+                htmlFor="passkey-name"
+                hint={t('Nama ini biar lo gampang ngenalin passkey-nya nanti.')}
+            >
+                <input
                     id="passkey-name"
                     type="text"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    placeholder="e.g., MacBook Pro, iPhone"
-                    className="border-foreground/20 mt-1 block w-full"
+                    placeholder={t('mis. MacBook, iPhone')}
+                    className="field"
                     autoFocus
                 />
-                <p className="text-muted-foreground text-xs">
-                    A name helps you identify this passkey later.
-                </p>
-            </div>
+            </Field>
 
             {error && <InputError message={error} />}
 
-            <div className="flex gap-2">
-                <Button type="submit" disabled={isLoading || !name.trim()}>
-                    {isLoading ? 'Registering...' : 'Register passkey'}
-                </Button>
-                <Button type="button" variant="ghost" onClick={handleCancel}>
-                    Cancel
-                </Button>
+            <div className="flex flex-wrap gap-2">
+                <button
+                    type="submit"
+                    disabled={isLoading || !name.trim()}
+                    className="btn-kuning inline-flex min-h-11 items-center justify-center rounded-xl px-4 text-sm disabled:opacity-45"
+                >
+                    {isLoading ? t('Mendaftarkan…') : t('Daftarkan passkey')}
+                </button>
+                <button
+                    type="button"
+                    onClick={handleCancel}
+                    className="text-muted-foreground hover:text-foreground inline-flex min-h-11 items-center justify-center rounded-xl px-4 text-sm font-semibold"
+                >
+                    {t('Batal')}
+                </button>
             </div>
         </form>
     );

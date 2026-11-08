@@ -1,12 +1,11 @@
-import { Form, Head } from '@inertiajs/react';
+import { Form, Head, usePage } from '@inertiajs/react';
+import { Field } from '@/components/finance/kit';
 import InputError from '@/components/input-error';
 import PasswordInput from '@/components/password-input';
 import TextLink from '@/components/text-link';
-import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Spinner } from '@/components/ui/spinner';
+import { t } from '@/lib/i18n';
 /* @chisel-registration */
 import { register } from '@/routes';
 /* @end-chisel-registration */
@@ -22,9 +21,20 @@ type Props = {
 };
 
 export default function Login({ status, canResetPassword }: Props) {
+    const { canRegister } = usePage().props;
+
     return (
         <>
-            <Head title="Log in" />
+            <Head title={t('Masuk')} />
+
+            {status && (
+                <p
+                    role="status"
+                    className="bg-masuk-wash text-masuk mb-6 rounded-xl px-4 py-3 text-sm font-medium"
+                >
+                    {status}
+                </p>
+            )}
 
             {/* @chisel-passkeys */}
             <PasskeyVerify />
@@ -37,32 +47,41 @@ export default function Login({ status, canResetPassword }: Props) {
             >
                 {({ processing, errors }) => (
                     <>
-                        <div className="grid gap-6">
-                            <div className="grid gap-2">
-                                <Label htmlFor="email">Email address</Label>
-                                <Input
+                        <div className="flex flex-col gap-5">
+                            <Field
+                                label={t('Email')}
+                                htmlFor="email"
+                                error={errors.email}
+                            >
+                                <input
                                     id="email"
                                     type="email"
                                     name="email"
+                                    className="field"
                                     required
                                     autoFocus
                                     tabIndex={1}
                                     autoComplete="email"
-                                    placeholder="email@example.com"
+                                    placeholder="email@contoh.com"
+                                    aria-invalid={!!errors.email}
                                 />
-                                <InputError message={errors.email} />
-                            </div>
+                            </Field>
 
-                            <div className="grid gap-2">
-                                <div className="flex items-center">
-                                    <Label htmlFor="password">Password</Label>
+                            <div className="flex flex-col gap-1.5">
+                                <div className="flex items-center justify-between gap-3">
+                                    <label
+                                        htmlFor="password"
+                                        className="text-sm font-medium"
+                                    >
+                                        {t('Password')}
+                                    </label>
                                     {canResetPassword && (
                                         <TextLink
                                             href={request()}
-                                            className="ml-auto text-sm"
+                                            className="text-sm"
                                             tabIndex={5}
                                         >
-                                            Forgot your password?
+                                            {t('Lupa password?')}
                                         </TextLink>
                                     )}
                                 </div>
@@ -72,54 +91,53 @@ export default function Login({ status, canResetPassword }: Props) {
                                     required
                                     tabIndex={2}
                                     autoComplete="current-password"
-                                    placeholder="Password"
+                                    aria-invalid={!!errors.password}
                                 />
                                 <InputError message={errors.password} />
                             </div>
 
-                            <div className="flex items-center space-x-3">
+                            <label
+                                htmlFor="remember"
+                                className="flex min-h-11 w-fit items-center gap-3 text-sm font-medium"
+                            >
                                 <Checkbox
                                     id="remember"
                                     name="remember"
                                     tabIndex={3}
                                 />
-                                <Label htmlFor="remember">Remember me</Label>
-                            </div>
+                                {t('Ingat gua di perangkat ini')}
+                            </label>
 
-                            <Button
+                            <button
                                 type="submit"
-                                className="mt-4 w-full"
                                 tabIndex={4}
                                 disabled={processing}
                                 data-test="login-button"
+                                className="btn-kuning inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl px-5 text-base disabled:opacity-45"
                             >
                                 {processing && <Spinner />}
-                                Log in
-                            </Button>
+                                {t('Masuk')}
+                            </button>
                         </div>
 
                         {/* @chisel-registration */}
-                        <div className="text-muted-foreground text-center text-sm">
-                            Don't have an account?{' '}
-                            <TextLink href={register()} tabIndex={5}>
-                                Sign up
-                            </TextLink>
-                        </div>
+                        {canRegister && (
+                            <p className="text-muted-foreground text-center text-sm">
+                                {t('Belum punya akun?')}{' '}
+                                <TextLink href={register()} tabIndex={5}>
+                                    {t('Daftar')}
+                                </TextLink>
+                            </p>
+                        )}
                         {/* @end-chisel-registration */}
                     </>
                 )}
             </Form>
-
-            {status && (
-                <div className="mb-4 text-center text-sm font-medium text-green-600">
-                    {status}
-                </div>
-            )}
         </>
     );
 }
 
 Login.layout = {
-    title: 'Log in to your account',
-    description: 'Enter your email and password below to log in',
+    title: t('Masuk ke DompetKu'),
+    description: t('Masukin email dan password lo'),
 };

@@ -2,8 +2,12 @@
 
 namespace App\Http\Middleware;
 
+use App\Models\Category;
+use App\Models\FundSource;
 use Illuminate\Http\Request;
+use Inertia\Inertia;
 use Inertia\Middleware;
+use Laravel\Fortify\Features;
 
 class HandleInertiaRequests extends Middleware
 {
@@ -41,6 +45,11 @@ class HandleInertiaRequests extends Middleware
 
         app()->setLocale($locale);
 
+        // pesan sukses dari redirect()->with('success') jadi toast sekali tampil (tidak tersimpan di history)
+        if ($request->hasSession() && is_string($message = $request->session()->get('success'))) {
+            Inertia::flash('toast', ['type' => 'success', 'message' => $message]);
+        }
+
         return [
             ...parent::share($request),
             'name' => config('app.name'),
@@ -48,7 +57,13 @@ class HandleInertiaRequests extends Middleware
                 'user' => $request->user(),
             ],
             'locale' => $locale,
+            'canRegister' => Features::enabled(Features::registration()),
             'sidebarOpen' => ! $request->hasCookie('sidebar_state') || $request->cookie('sidebar_state') === 'true',
+            // pilihan untuk sheet "Catat" global; closure = cuma dihitung saat dibutuhkan, dilewati di partial reload
+            'quickEntry' => fn () => $request->user() ? [
+                'fundSources' => FundSource::ownedBy($request->user()->id)->where('is_active', true)->orderBy('name')->get(['id', 'name', 'type', 'color']),
+                'categories' => Category::ownedBy($request->user()->id)->where('is_archived', false)->orderBy('name')->get(['id', 'name', 'type', 'color', 'bucket']),
+            ] : null,
         ];
     }
 }

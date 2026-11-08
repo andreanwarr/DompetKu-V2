@@ -23,13 +23,21 @@ class InsightService
         $bln = ['01' => 'Januari', '02' => 'Februari', '03' => 'Maret', '04' => 'April', '05' => 'Mei', '06' => 'Juni', '07' => 'Juli', '08' => 'Agustus', '09' => 'September', '10' => 'Oktober', '11' => 'November', '12' => 'Desember'];
         $monthLabel = ($bln[substr($month, 5, 2)] ?? $month).' '.substr($month, 0, 4);
 
-        $income = (int) JournalEntry::ownedBy($userId)->where('status', 'posted')->where('type', 'income')->whereBetween('effective_date', [$mFrom, $mTo])->sum('amount_minor');
+        // satu query agregat untuk pemasukan, gaji rutin, pengeluaran, dan setoran tabungan bulan ini
+        $totals = JournalEntry::ownedBy($userId)->where('status', 'posted')->whereBetween('effective_date', [$mFrom, $mTo])
+            ->selectRaw(implode(', ', [
+                "COALESCE(SUM(CASE WHEN type = 'income' THEN amount_minor ELSE 0 END), 0) AS income",
+                "COALESCE(SUM(CASE WHEN type = 'income' AND is_recurring = ? THEN amount_minor ELSE 0 END), 0) AS base_income",
+                "COALESCE(SUM(CASE WHEN type = 'expense' THEN amount_minor ELSE 0 END), 0) AS expense",
+                "COALESCE(SUM(CASE WHEN type = 'savings_deposit' THEN amount_minor ELSE 0 END), 0) AS dep",
+            ]), [true])->toBase()->first();
+        $income = (int) $totals->income;
         // patokan persentase = pemasukan rutin (gaji); bonus/thr (is_recurring=false) tidak menggelembungkan denominator
-        $baseIncome = (int) JournalEntry::ownedBy($userId)->where('status', 'posted')->where('type', 'income')->where('is_recurring', true)->whereBetween('effective_date', [$mFrom, $mTo])->sum('amount_minor');
+        $baseIncome = (int) $totals->base_income;
         $bonus = max($income - $baseIncome, 0);
-        $expense = (int) JournalEntry::ownedBy($userId)->where('status', 'posted')->where('type', 'expense')->whereBetween('effective_date', [$mFrom, $mTo])->sum('amount_minor');
+        $expense = (int) $totals->expense;
         // nabung bulan ini: setor dari kas + setoran dari luar (mis. istri)
-        $dep = (int) JournalEntry::ownedBy($userId)->where('status', 'posted')->where('type', 'savings_deposit')->whereBetween('effective_date', [$mFrom, $mTo])->sum('amount_minor');
+        $dep = (int) $totals->dep;
         $depExternal = (int) DB::table('journal_lines')->join('journal_entries', 'journal_entries.id', '=', 'journal_lines.journal_entry_id')
             ->where('journal_entries.user_id', $userId)->where('journal_entries.status', 'posted')
             ->where('journal_entries.type', 'savings_deposit')->where('journal_lines.account_type', 'external_contribution')
@@ -104,12 +112,12 @@ class InsightService
         // 4. spike vs rata-rata 5 bulan sebelumnya
         $prev = JournalEntry::ownedBy($userId)->where('status', 'posted')->whereIn('type', ['income', 'expense'])
             ->whereBetween('effective_date', [date('Y-m-01', strtotime("$mFrom -5 months")), date('Y-m-t', strtotime("$mFrom -1 month"))])
-            ->selectRaw("to_char(effective_date, 'YYYY-MM') AS m, type, SUM(amount_minor) AS s")
+            ->selectRaw((DB::getDriverName() === 'pgsql' ? "to_char(effective_date, 'YYYY-MM')" : "strftime('%Y-%m', effective_date)").' AS m, type, SUM(amount_minor) AS s')
             ->groupBy('m', 'type')->get();
         $prevExpense = $prev->where('type', 'expense');
         $avgPrevExpense = $prevExpense->count() > 0 ? (int) round($prevExpense->sum('s') / $prevExpense->count()) : 0;
         if ($avgPrevExpense > 0 && $expense > $avgPrevExpense * 1.5) {
-            $insights[] = ['type' => 'warning', 'text' => "Pengeluaran bulan ini naik ".round(($expense / $avgPrevExpense - 1) * 100)."% dari biasanya (rata-rata 5 bulan terakhir {$rp($avgPrevExpense)}/bulan). Ada pengeluaran tak terduga?"];
+            $insights[] = ['type' => 'warning', 'text' => 'Pengeluaran bulan ini naik '.round(($expense / $avgPrevExpense - 1) * 100)."% dari biasanya (rata-rata 5 bulan terakhir {$rp($avgPrevExpense)}/bulan). Ada pengeluaran tak terduga?"];
         }
 
         // 5. dana darurat (hanya kalau caller kasih saldo tabungan)

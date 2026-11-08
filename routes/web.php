@@ -20,7 +20,8 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::put('transactions/{id}', [TransactionController::class, 'update'])->name('transactions.update');
     Route::delete('transactions/{id}', [TransactionController::class, 'destroy'])->name('transactions.destroy');
     Route::post('transfers', [TransactionController::class, 'transfer'])->name('transfers.store');
-    Route::resource('fund-sources', FundSourceController::class)->only(['index', 'store']);
+    Route::resource('fund-sources', FundSourceController::class)->only(['index', 'store', 'update']);
+    Route::post('fund-sources/{fundSource}/adjust', [FundSourceController::class, 'adjust'])->name('fund-sources.adjust');
     Route::resource('categories', CategoryController::class)->only(['index', 'store', 'update']);
     Route::get('planning', [PlanningController::class, 'index'])->name('planning.index');
     Route::get('tabungan', [PlanningController::class, 'savings'])->name('savings.index');

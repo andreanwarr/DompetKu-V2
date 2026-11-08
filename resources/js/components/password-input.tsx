@@ -1,7 +1,7 @@
 import { Eye, EyeOff } from 'lucide-react';
 import type { ComponentProps, Ref } from 'react';
 import { useState } from 'react';
-import { Input } from '@/components/ui/input';
+import { t } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
 export default function PasswordInput({
@@ -13,17 +13,19 @@ export default function PasswordInput({
 
     return (
         <div className="relative">
-            <Input
+            <input
                 type={showPassword ? 'text' : 'password'}
-                className={cn('pr-10', className)}
+                className={cn('field pr-12', className)}
                 ref={ref}
                 {...props}
             />
             <button
                 type="button"
                 onClick={() => setShowPassword((prev) => !prev)}
-                className="text-muted-foreground hover:text-foreground focus-visible:ring-ring absolute inset-y-0 right-0 flex min-w-11 items-center justify-center rounded-r-xl px-3 focus-visible:ring-[3px] focus-visible:outline-none"
-                aria-label={showPassword ? 'Hide password' : 'Show password'}
+                className="text-muted-foreground hover:text-foreground absolute inset-y-0 right-0 flex min-w-12 items-center justify-center rounded-r-xl"
+                aria-label={
+                    showPassword ? t('Sembunyikan password') : t('Lihat password')
+                }
                 aria-pressed={showPassword}
             >
                 {showPassword ? (

@@ -43,9 +43,14 @@ class CategoryController extends Controller
         abort_unless($category->user_id === $request->user()->id, 404);
         $data = $request->validate([
             'name' => ['required', 'string', 'max:120'],
-            'bucket' => ['required', Rule::in(['essential', 'lifestyle', 'saving'])],
+            // kategori pemasukan bucket-nya selalu 'income'
+            'bucket' => [Rule::requiredIf($category->type === 'expense'), Rule::in(['essential', 'lifestyle', 'saving'])],
             'color' => ['nullable', 'regex:/^#[0-9a-fA-F]{6}$/'],
+            'is_archived' => ['sometimes', 'boolean'],
         ]);
+        if ($category->type === 'income') {
+            $data['bucket'] = 'income';
+        }
         $category->update($data);
 
         return back()->with('success', __('Kategori berhasil diperbarui.'));

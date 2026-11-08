@@ -6,7 +6,7 @@ import AppLayout from '@/layouts/app-layout';
 import AuthLayout from '@/layouts/auth-layout';
 import SettingsLayout from '@/layouts/settings/layout';
 
-const appName = import.meta.env.VITE_APP_NAME || 'Laravel';
+const appName = import.meta.env.VITE_APP_NAME || 'DompetKu';
 
 void createInertiaApp({
     title: (title) => (title ? `${title} - ${appName}` : appName),
@@ -32,9 +32,17 @@ void createInertiaApp({
         );
     },
     progress: {
-        color: '#8da760',
+        color: '#2f5bff',
+        delay: 120,
     },
 });
 
 // This will set light / dark mode on load...
 initializeTheme();
+
+// PWA: installable + instant shell (needs https or localhost)
+if ('serviceWorker' in navigator && window.isSecureContext) {
+    window.addEventListener('load', () => {
+        void navigator.serviceWorker.register('/sw.js');
+    });
+}

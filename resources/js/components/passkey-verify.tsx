@@ -3,9 +3,8 @@ import { router } from '@inertiajs/react';
 import { usePasskeyVerify } from '@laravel/passkeys/react';
 import { KeyRound } from 'lucide-react';
 import InputError from '@/components/input-error';
-import { Button } from '@/components/ui/button';
-import { Separator } from '@/components/ui/separator';
 import { Spinner } from '@/components/ui/spinner';
+import { t } from '@/lib/i18n';
 
 type Props = {
     routes?: {
@@ -42,32 +41,32 @@ export default function PasskeyVerify({
     return (
         <>
             <div className="grid gap-2">
-                <Button
+                <button
                     type="button"
-                    variant="outline"
-                    className="w-full"
                     onClick={verify}
                     disabled={isLoading}
+                    className="border-input bg-card hover:bg-sunken inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border px-4 text-sm font-semibold transition-colors duration-150 disabled:opacity-45"
                 >
-                    {isLoading ? <Spinner /> : <KeyRound className="h-4 w-4" />}
+                    {isLoading ? (
+                        <Spinner />
+                    ) : (
+                        <KeyRound className="size-4" aria-hidden="true" />
+                    )}
                     {isLoading
-                        ? (loadingLabel ?? 'Authenticating...')
-                        : (label ?? 'Sign in with a passkey')}
-                </Button>
+                        ? (loadingLabel ?? t('Lagi ngecek…'))
+                        : (label ?? t('Masuk pakai passkey'))}
+                </button>
                 {error && (
                     <InputError message={error} className="text-center" />
                 )}
             </div>
 
-            <div className="relative my-6">
-                <div className="absolute inset-0 flex items-center">
-                    <Separator className="w-full" />
-                </div>
-                <div className="relative flex justify-center text-xs uppercase">
-                    <span className="bg-background text-muted-foreground px-2">
-                        {separator ?? 'Or continue with email'}
-                    </span>
-                </div>
+            <div className="my-6 flex items-center gap-3">
+                <span className="bg-border h-px flex-1" aria-hidden="true" />
+                <span className="label-caps">
+                    {separator ?? t('Atau pakai email')}
+                </span>
+                <span className="bg-border h-px flex-1" aria-hidden="true" />
             </div>
         </>
     );

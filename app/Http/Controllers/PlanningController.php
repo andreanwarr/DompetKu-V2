@@ -8,7 +8,9 @@ use App\Models\JournalLine;
 use App\Models\LoanPayable;
 use App\Models\Receivable;
 use App\Models\SavingGoal;
+use App\Models\User;
 use App\Services\LedgerService;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -20,36 +22,20 @@ use Inertia\Response;
 
 class PlanningController extends Controller
 {
-    public function index(Request $request): Response
+    public function index(): RedirectResponse
     {
-        $userId = (int) $request->user()->id;
-        $goals = SavingGoal::where('user_id', $userId)->orderByRaw("CASE WHEN status = 'active' THEN 0 ELSE 1 END")->get();
-        $goalIds = $goals->pluck('id');
-        $movements = JournalLine::query()
-            ->select('account_id', DB::raw('SUM(debit_minor - credit_minor) AS movement'))
-            ->where('account_type', 'saving')->whereIn('account_id', $goalIds)
-            ->whereHas('entry', fn ($query) => $query->ownedBy($userId)->where('status', 'posted'))
-            ->groupBy('account_id')->pluck('movement', 'account_id');
-
-        return Inertia::render('planning/index', [
-            'fundSources' => FundSource::ownedBy($userId)->where('is_active', true)->orderBy('name')->get(['id', 'name']),
-            'savingGoals' => $goals->map(fn (SavingGoal $goal) => [
-                ...$goal->only(['id', 'name', 'target_minor', 'target_date', 'color', 'status']),
-                'balance' => $goal->opening_balance_minor + (int) ($movements[$goal->id] ?? 0),
-            ]),
-            'receivables' => Receivable::where('user_id', $userId)->with('payments')->latest('issued_at')->get(),
-            'loans' => LoanPayable::where('user_id', $userId)->with('payments')->latest('received_at')->get(),
-        ]);
+        // halaman gabungan lama dipecah ke /tabungan dan /kasbon (pinjaman ikut di /kasbon)
+        return redirect()->route('kasbon.index');
     }
 
     public function savings(Request $request): Response
     {
-        $userId = (int) $request->user()->id;
-            $savingData = $this->savingsData($userId);
-            return Inertia::render('tabungan/index', [
-                'fundSources' => $savingData[0],
-                'savingGoals' => $savingData[1],
-            ]);
+        [$fundSources, $savingGoals] = $this->savingsData($request->user());
+
+        return Inertia::render('tabungan/index', [
+            'fundSources' => $fundSources,
+            'savingGoals' => $savingGoals,
+        ]);
     }
 
     public function kasbon(Request $request): Response
@@ -57,13 +43,15 @@ class PlanningController extends Controller
         $userId = (int) $request->user()->id;
 
         return Inertia::render('kasbon/index', [
-            'fundSources' => FundSource::ownedBy($userId)->where('is_active', true)->orderBy('name')->get(['id', 'name']),
+            'fundSources' => FundSource::ownedBy($userId)->where('is_active', true)->orderBy('name')->get(['id', 'name', 'type', 'color']),
             'receivables' => Receivable::where('user_id', $userId)->with('payments')->latest('issued_at')->get(),
+            'loans' => LoanPayable::where('user_id', $userId)->with('payments')->latest('received_at')->get(),
         ]);
     }
 
-    private function savingsData(int $userId): array
+    private function savingsData(User $user): array
     {
+        $userId = (int) $user->id;
         $goals = SavingGoal::where('user_id', $userId)->orderByRaw("CASE WHEN status = 'active' THEN 0 ELSE 1 END")->get();
         $goalIds = $goals->pluck('id');
         $movements = JournalLine::query()
@@ -72,20 +60,20 @@ class PlanningController extends Controller
             ->whereHas('entry', fn ($query) => $query->ownedBy($userId)->where('status', 'posted'))
             ->groupBy('account_id')->pluck('movement', 'account_id');
 
-        $history = JournalEntry::ownedBy($userId)->with('lines')->where('status', 'posted')
+        $history = JournalEntry::ownedBy($userId)->with('lines:id,journal_entry_id,account_type,account_id')->where('status', 'posted')
             ->whereIn('type', ['savings_deposit', 'savings_withdrawal'])->latest('effective_date')->latest('id')->get()
             ->map(fn (JournalEntry $entry) => [
                 'goal_id' => $entry->lines->firstWhere('account_type', 'saving')?->account_id,
                 'type' => $entry->type,
                 'amount' => $entry->amount_minor,
                 'date' => $entry->effective_date->toDateString(),
-                'person' => $entry->counterparty ?: 'Andre',
+                'person' => $entry->counterparty ?: $user->name,
                 'source' => $entry->lines->firstWhere('account_type', 'external_contribution') ? 'Dari luar' : 'Sumber dana',
                 'description' => $entry->description,
             ])->groupBy('goal_id');
 
         return [
-            FundSource::ownedBy($userId)->where('is_active', true)->orderBy('name')->get(['id', 'name']),
+            FundSource::ownedBy($userId)->where('is_active', true)->orderBy('name')->get(['id', 'name', 'type', 'color']),
             $goals->map(fn (SavingGoal $goal) => [
                 ...$goal->only(['id', 'name', 'target_minor', 'target_date', 'color', 'status']),
                 'balance' => $goal->opening_balance_minor + (int) ($movements[$goal->id] ?? 0),
@@ -119,46 +107,53 @@ class PlanningController extends Controller
             'amount_minor' => ['required', 'integer', 'min:1'],
             'effective_date' => ['required', 'date'],
             'description' => ['nullable', 'string', 'max:1000'],
+            'idempotency_key' => ['nullable', 'uuid'],
         ]);
         $external = (bool) ($data['external'] ?? false);
         $source = $external ? null : FundSource::ownedBy((int) $request->user()->id)->findOrFail((int) $data['fund_source_id']);
 
-        if ($data['direction'] === 'withdrawal') {
-            $movement = JournalLine::where('account_type', 'saving')->where('account_id', $savingGoal->id)
-                ->whereHas('entry', fn ($query) => $query->where('user_id', $request->user()->id)->where('status', 'posted'))
-                ->sum(DB::raw('debit_minor - credit_minor'));
-            if ($savingGoal->opening_balance_minor + (int) $movement < (int) $data['amount_minor']) {
-                throw ValidationException::withMessages(['amount_minor' => __('Saldo tabungan tidak mencukupi.')]);
-            }
+        // idempotensi: key duplikat = request ulang (double tap), anggap sukses
+        try {
+            DB::transaction(function () use ($request, $data, $savingGoal, $source, $external, $ledger) {
+                // lock goal supaya dua penarikan bersamaan tidak lolos cek saldo
+                SavingGoal::whereKey($savingGoal->id)->lockForUpdate()->first();
+                if ($data['direction'] === 'withdrawal') {
+                    $movement = JournalLine::where('account_type', 'saving')->where('account_id', $savingGoal->id)
+                        ->whereHas('entry', fn ($query) => $query->where('user_id', $request->user()->id)->where('status', 'posted'))
+                        ->sum(DB::raw('debit_minor - credit_minor'));
+                    if ($savingGoal->opening_balance_minor + (int) $movement < (int) $data['amount_minor']) {
+                        throw ValidationException::withMessages(['amount_minor' => __('Saldo tabungan tidak mencukupi.')]);
+                    }
+                }
+                $amount = (int) $data['amount_minor'];
+                $entry = JournalEntry::create([
+                    'user_id' => $request->user()->id,
+                    'public_id' => (string) Str::uuid(),
+                    'type' => 'savings_'.$data['direction'],
+                    'status' => 'posted',
+                    'amount_minor' => $amount,
+                    'effective_date' => $data['effective_date'],
+                    'description' => $data['description'] ?? $savingGoal->name,
+                    'counterparty' => $data['counterparty'] ?? null,
+                    'idempotency_key' => $data['idempotency_key'] ?? null,
+                ]);
+                // external (mis. setoran istri): uang masuk dari luar sistem, saldo sumber dana tidak tersentuh
+                $creditAccount = $external
+                    ? ['account_type' => 'external_contribution', 'account_id' => null, 'credit_minor' => $amount]
+                    : ['account_type' => 'fund_source', 'account_id' => $source->id, 'credit_minor' => $amount];
+                if ($data['direction'] === 'deposit') {
+                    $entry->lines()->create(['account_type' => 'saving', 'account_id' => $savingGoal->id, 'debit_minor' => $amount]);
+                    $entry->lines()->create($creditAccount);
+                } else {
+                    $entry->lines()->create($external
+                        ? ['account_type' => 'external_contribution', 'account_id' => null, 'debit_minor' => $amount]
+                        : ['account_type' => 'fund_source', 'account_id' => $source->id, 'debit_minor' => $amount]);
+                    $entry->lines()->create(['account_type' => 'saving', 'account_id' => $savingGoal->id, 'credit_minor' => $amount]);
+                }
+                $ledger->assertBalanced($entry);
+            });
+        } catch (UniqueConstraintViolationException) {
         }
-
-        DB::transaction(function () use ($request, $data, $savingGoal, $source, $external, $ledger) {
-            $amount = (int) $data['amount_minor'];
-            $entry = JournalEntry::create([
-                'user_id' => $request->user()->id,
-                'public_id' => (string) Str::uuid(),
-                'type' => 'savings_'.$data['direction'],
-                'status' => 'posted',
-                'amount_minor' => $amount,
-                'effective_date' => $data['effective_date'],
-                'description' => $data['description'] ?? $savingGoal->name,
-                'counterparty' => $data['counterparty'] ?? null,
-            ]);
-            // external (mis. setoran istri): uang masuk dari luar sistem, saldo sumber dana tidak tersentuh
-            $creditAccount = $external
-                ? ['account_type' => 'external_contribution', 'account_id' => null, 'credit_minor' => $amount]
-                : ['account_type' => 'fund_source', 'account_id' => $source->id, 'credit_minor' => $amount];
-            if ($data['direction'] === 'deposit') {
-                $entry->lines()->create(['account_type' => 'saving', 'account_id' => $savingGoal->id, 'debit_minor' => $amount]);
-                $entry->lines()->create($creditAccount);
-            } else {
-                $entry->lines()->create($external
-                    ? ['account_type' => 'external_contribution', 'account_id' => null, 'debit_minor' => $amount]
-                    : ['account_type' => 'fund_source', 'account_id' => $source->id, 'debit_minor' => $amount]);
-                $entry->lines()->create(['account_type' => 'saving', 'account_id' => $savingGoal->id, 'credit_minor' => $amount]);
-            }
-            $ledger->assertBalanced($entry);
-        });
 
         return back()->with('success', __('Mutasi tabungan berhasil dicatat.'));
     }
@@ -202,12 +197,14 @@ class PlanningController extends Controller
             'interest_minor' => ['nullable', 'integer', 'min:0'], 'penalty_minor' => ['nullable', 'integer', 'min:0'],
             'paid_at' => ['required', 'date'],
         ]);
-        if ((int) $data['principal_minor'] > $receivable->outstanding_minor) {
-            throw ValidationException::withMessages(['principal_minor' => __('Pokok melebihi sisa kasbon.')]);
-        }
         $source = FundSource::ownedBy((int) $request->user()->id)->findOrFail($data['fund_source_id']);
 
         DB::transaction(function () use ($request, $data, $receivable, $source, $ledger) {
+            // lock + baca ulang sisa: double tap tidak boleh bayar melebihi sisa
+            $receivable = Receivable::lockForUpdate()->findOrFail($receivable->id);
+            if ((int) $data['principal_minor'] > $receivable->outstanding_minor) {
+                throw ValidationException::withMessages(['principal_minor' => __('Pokok melebihi sisa kasbon.')]);
+            }
             $interest = (int) ($data['interest_minor'] ?? 0) + (int) ($data['penalty_minor'] ?? 0);
             $total = (int) $data['principal_minor'] + $interest;
             $entry = JournalEntry::create([
@@ -263,11 +260,13 @@ class PlanningController extends Controller
             'interest_minor' => ['nullable', 'integer', 'min:0'], 'penalty_minor' => ['nullable', 'integer', 'min:0'],
             'paid_at' => ['required', 'date'],
         ]);
-        if ((int) $data['principal_minor'] > $loan->outstanding_minor) {
-            throw ValidationException::withMessages(['principal_minor' => __('Pokok melebihi sisa pinjaman.')]);
-        }
         $source = FundSource::ownedBy((int) $request->user()->id)->findOrFail($data['fund_source_id']);
         DB::transaction(function () use ($request, $data, $loan, $source, $ledger) {
+            // lock + baca ulang sisa: double tap tidak boleh bayar melebihi sisa
+            $loan = LoanPayable::lockForUpdate()->findOrFail($loan->id);
+            if ((int) $data['principal_minor'] > $loan->outstanding_minor) {
+                throw ValidationException::withMessages(['principal_minor' => __('Pokok melebihi sisa pinjaman.')]);
+            }
             $cost = (int) ($data['interest_minor'] ?? 0) + (int) ($data['penalty_minor'] ?? 0);
             $total = (int) $data['principal_minor'] + $cost;
             $entry = JournalEntry::create([

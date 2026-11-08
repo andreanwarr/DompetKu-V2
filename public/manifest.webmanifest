@@ -1,0 +1,23 @@
+{
+    "name": "DompetKu",
+    "short_name": "DompetKu",
+    "description": "Catat pemasukan, pengeluaran, tabungan, dan kasbon. Saldo kebaca sekali lirik.",
+    "lang": "id",
+    "id": "/dashboard",
+    "start_url": "/dashboard?source=pwa",
+    "scope": "/",
+    "display": "standalone",
+    "orientation": "portrait",
+    "background_color": "#eef0f4",
+    "theme_color": "#0f1222",
+    "categories": ["finance", "productivity"],
+    "icons": [
+        { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+        { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+        { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    ],
+    "shortcuts": [
+        { "name": "Catat pengeluaran", "short_name": "Catat", "url": "/dashboard?new=1", "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }] },
+        { "name": "Transaksi", "url": "/transactions", "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }] }
+    ]
+}

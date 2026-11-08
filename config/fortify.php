@@ -168,7 +168,8 @@ return [
 
     'features' => [
         /* @chisel-registration */
-        Features::registration(),
+        // REGISTRATION_ENABLED=false menutup pendaftaran (mis. sebelum email verifikasi siap)
+        ...(env('REGISTRATION_ENABLED', true) ? [Features::registration()] : []),
         /* @end-chisel-registration */
         Features::resetPasswords(),
         /* @chisel-email-verification */

@@ -4,8 +4,9 @@ import { useEffect, useRef, useState } from 'react';
 import Heading from '@/components/heading';
 import TwoFactorRecoveryCodes from '@/components/two-factor-recovery-codes';
 import TwoFactorSetupModal from '@/components/two-factor-setup-modal';
-import { Button } from '@/components/ui/button';
 import { useTwoFactorAuth } from '@/hooks/use-two-factor-auth';
+import { t } from '@/lib/i18n';
+import { cn } from '@/lib/utils';
 import { disable, enable } from '@/routes/two-factor';
 
 export type Props = {
@@ -45,33 +46,44 @@ export default function ManageTwoFactor(props: Props) {
     }
 
     return (
-        <div className="space-y-6">
-            <Heading
-                variant="small"
-                title="Two-factor authentication"
-                description="Manage your two-factor authentication settings"
-            />
+        <section className="plank flex flex-col gap-5 p-5 sm:p-6">
+            <div className="flex items-start justify-between gap-3">
+                <Heading
+                    variant="small"
+                    title={t('Verifikasi 2 langkah')}
+                    description={t('Lapisan aman tambahan tiap lo login')}
+                />
+                <span
+                    className={cn(
+                        'shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold',
+                        twoFactorEnabled
+                            ? 'bg-masuk-wash text-masuk'
+                            : 'bg-sunken text-muted-foreground',
+                    )}
+                >
+                    {twoFactorEnabled ? t('Aktif') : t('Belum aktif')}
+                </span>
+            </div>
+
             {twoFactorEnabled ? (
-                <div className="flex flex-col items-start justify-start space-y-4">
+                <div className="flex flex-col items-start gap-4">
                     <p className="text-muted-foreground text-sm">
-                        You will be prompted for a secure, random pin during
-                        login, which you can retrieve from the TOTP-supported
-                        application on your phone.
+                        {t(
+                            'Tiap login, lo bakal diminta kode acak dari aplikasi autentikator (TOTP) di HP lo.',
+                        )}
                     </p>
 
-                    <div className="relative inline">
-                        <Form {...disable.form()}>
-                            {({ processing }) => (
-                                <Button
-                                    variant="destructive"
-                                    type="submit"
-                                    disabled={processing}
-                                >
-                                    Disable 2FA
-                                </Button>
-                            )}
-                        </Form>
-                    </div>
+                    <Form {...disable.form()}>
+                        {({ processing }) => (
+                            <button
+                                type="submit"
+                                disabled={processing}
+                                className="border-keluar/40 text-keluar hover:bg-keluar-wash inline-flex min-h-11 items-center justify-center rounded-xl border px-4 text-sm font-semibold transition-colors duration-150 disabled:opacity-45"
+                            >
+                                {t('Matikan 2FA')}
+                            </button>
+                        )}
+                    </Form>
 
                     <TwoFactorRecoveryCodes
                         recoveryCodesList={recoveryCodesList}
@@ -80,33 +92,42 @@ export default function ManageTwoFactor(props: Props) {
                     />
                 </div>
             ) : (
-                <div className="flex flex-col items-start justify-start space-y-4">
+                <div className="flex flex-col items-start gap-4">
                     <p className="text-muted-foreground text-sm">
-                        When you enable two-factor authentication, you will be
-                        prompted for a secure pin during login. This pin can be
-                        retrieved from a TOTP-supported application on your
-                        phone.
+                        {t(
+                            'Kalau 2FA aktif, tiap login lo diminta kode aman dari aplikasi autentikator (TOTP) di HP.',
+                        )}
                     </p>
 
-                    <div>
-                        {hasSetupData ? (
-                            <Button onClick={() => setShowSetupModal(true)}>
-                                <ShieldCheck />
-                                Continue setup
-                            </Button>
-                        ) : (
-                            <Form
-                                {...enable.form()}
-                                onSuccess={() => setShowSetupModal(true)}
-                            >
-                                {({ processing }) => (
-                                    <Button type="submit" disabled={processing}>
-                                        Enable 2FA
-                                    </Button>
-                                )}
-                            </Form>
-                        )}
-                    </div>
+                    {hasSetupData ? (
+                        <button
+                            type="button"
+                            onClick={() => setShowSetupModal(true)}
+                            className="btn-kuning inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm"
+                        >
+                            <ShieldCheck className="size-4" aria-hidden="true" />
+                            {t('Lanjut setup')}
+                        </button>
+                    ) : (
+                        <Form
+                            {...enable.form()}
+                            onSuccess={() => setShowSetupModal(true)}
+                        >
+                            {({ processing }) => (
+                                <button
+                                    type="submit"
+                                    disabled={processing}
+                                    className="btn-kuning inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm disabled:opacity-45"
+                                >
+                                    <ShieldCheck
+                                        className="size-4"
+                                        aria-hidden="true"
+                                    />
+                                    {t('Aktifkan 2FA')}
+                                </button>
+                            )}
+                        </Form>
+                    )}
                 </div>
             )}
 
@@ -121,6 +142,6 @@ export default function ManageTwoFactor(props: Props) {
                 fetchSetupData={fetchSetupData}
                 errors={errors}
             />
-        </div>
+        </section>
     );
 }

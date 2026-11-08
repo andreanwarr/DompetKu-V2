@@ -1,6 +1,5 @@
 import { KeyRound, Trash2 } from 'lucide-react';
 import { useState } from 'react';
-import { Button } from '@/components/ui/button';
 import {
     Dialog,
     DialogClose,
@@ -10,6 +9,7 @@ import {
     DialogTitle,
     DialogTrigger,
 } from '@/components/ui/dialog';
+import { t } from '@/lib/i18n';
 import type { Passkey } from '@/types/auth';
 
 type Props = {
@@ -26,30 +26,29 @@ export default function PasskeyItem({ passkey, onDelete }: Props) {
     };
 
     return (
-        <div className="flex items-center justify-between border-b p-4 last:border-b-0">
-            <div className="flex items-center gap-4">
-                <div className="bg-muted flex h-10 w-10 shrink-0 items-center justify-center rounded-xl">
-                    <KeyRound className="text-muted-foreground h-5 w-5" />
-                </div>
-                <div className="space-y-1">
-                    <div className="flex items-center gap-2.5">
-                        <p className="font-medium tracking-tight">
-                            {passkey.name}
-                        </p>
+        <div className="flex items-center justify-between gap-3 p-4">
+            <div className="flex min-w-0 items-center gap-3">
+                <span className="bg-sunken text-muted-foreground grid size-10 shrink-0 place-items-center rounded-xl">
+                    <KeyRound className="size-5" aria-hidden="true" />
+                </span>
+                <div className="min-w-0">
+                    <div className="flex min-w-0 items-center gap-2">
+                        <p className="truncate font-semibold">{passkey.name}</p>
                         {passkey.authenticator && (
-                            <span className="bg-muted text-muted-foreground ring-border inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium tracking-wide uppercase ring-1 ring-inset">
+                            <span className="label-caps bg-sunken shrink-0 rounded-md px-1.5 py-0.5">
                                 {passkey.authenticator}
                             </span>
                         )}
                     </div>
                     <p className="text-muted-foreground text-sm">
-                        Added {passkey.created_at_diff}
+                        {t('Ditambah')} {passkey.created_at_diff}
                         {passkey.last_used_at_diff && (
                             <>
-                                <span className="text-muted-foreground/50 mx-1">
-                                    /
+                                <span className="mx-1" aria-hidden="true">
+                                    ·
                                 </span>
-                                Last used {passkey.last_used_at_diff}
+                                {t('Terakhir dipakai')}{' '}
+                                {passkey.last_used_at_diff}
                             </>
                         )}
                     </p>
@@ -58,33 +57,37 @@ export default function PasskeyItem({ passkey, onDelete }: Props) {
 
             <Dialog>
                 <DialogTrigger asChild>
-                    <Button
-                        variant="ghost"
-                        size="sm"
-                        className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                    <button
+                        type="button"
+                        className="text-keluar hover:bg-keluar-wash grid size-11 shrink-0 place-items-center rounded-xl transition-colors duration-150"
                     >
-                        <Trash2 className="h-4 w-4" />
-                        <span className="sr-only">Remove</span>
-                    </Button>
+                        <Trash2 className="size-4" aria-hidden="true" />
+                        <span className="sr-only">{t('Hapus passkey')}</span>
+                    </button>
                 </DialogTrigger>
                 <DialogContent>
-                    <DialogTitle>Remove passkey</DialogTitle>
+                    <DialogTitle>{t('Hapus passkey')}</DialogTitle>
                     <DialogDescription>
-                        Are you sure you want to remove the "{passkey.name}"
-                        passkey? You will no longer be able to use it to sign
-                        in.
+                        {t('Yakin hapus passkey')} "{passkey.name}"?{' '}
+                        {t('Passkey ini nggak bisa dipakai login lagi.')}
                     </DialogDescription>
                     <DialogFooter className="gap-2">
                         <DialogClose asChild>
-                            <Button variant="secondary">Cancel</Button>
+                            <button
+                                type="button"
+                                className="border-border hover:bg-sunken inline-flex min-h-11 items-center justify-center rounded-xl border px-4 text-sm font-semibold"
+                            >
+                                {t('Batal')}
+                            </button>
                         </DialogClose>
-                        <Button
-                            variant="destructive"
+                        <button
+                            type="button"
                             onClick={handleDelete}
                             disabled={isDeleting}
+                            className="bg-destructive text-destructive-foreground inline-flex min-h-11 items-center justify-center rounded-xl px-4 text-sm font-semibold disabled:opacity-45"
                         >
-                            {isDeleting ? 'Removing...' : 'Remove passkey'}
-                        </Button>
+                            {isDeleting ? t('Menghapus…') : t('Hapus passkey')}
+                        </button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>

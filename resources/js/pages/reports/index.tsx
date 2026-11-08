@@ -1,666 +1,358 @@
-import { Head, router } from '@inertiajs/react';
-import { CalendarDays, ChevronLeft, ChevronRight, CircleAlert, CircleCheck, Download, ReceiptText, TrendingDown, TrendingUp } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
-import {
-    DetailDialog,
-    DetailHint,
-    interactiveCardClass,
-} from '@/components/finance/detail-dialog';
-import { PageHeading } from '@/components/finance/page-heading';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { rupiah, shortDate } from '@/lib/format';
-import { t } from '@/lib/i18n';
+import { Head, Link, router } from '@inertiajs/react';
+import { CalendarRange, CircleAlert, CircleCheck, Download, ReceiptText } from 'lucide-react';
+import { useState } from 'react';
+import { EmptyState, Field, Page, PageHeader, Panel, Section, Segmented } from '@/components/finance/kit';
+import { Money } from '@/components/finance/money';
+import { dayLabel, localDate, monthLabel, rupiah, shortDate, shiftMonth } from '@/lib/format';
+import { locale, t } from '@/lib/i18n';
+import { cn } from '@/lib/utils';
 
 type Month = { month: string; income: number; expense: number };
-type CategoryExpense = {
-    id: number;
-    name: string;
-    color: string;
-    total: number;
-};
-type CategoryTx = { type?: string; title: string; amount: number; date: string };
-export default function Reports({
-    filters,
-    summary,
-    monthly,
-    expenseByCategory,
-    incomeByCategory,
-    insights,
-    categoryTransactions,
-}: {
+type CategoryTotal = { id: number; name: string; color: string; total: number };
+type CategoryTx = { type?: string; category_id?: number | null; title: string; amount: number; date: string };
+type Kind = 'expense' | 'income';
+
+type Props = {
     filters: { from: string; to: string };
     summary: { income: number; expense: number; recurringIncome: number; bonusIncome: number };
     monthly: Month[];
-    expenseByCategory: CategoryExpense[];
-    incomeByCategory: CategoryExpense[];
+    expenseByCategory: CategoryTotal[];
+    incomeByCategory: CategoryTotal[];
     insights: { type: 'positive' | 'warning'; text: string }[];
     categoryTransactions: Record<string, CategoryTx[]>;
-}) {
-    const totalExpense = expenseByCategory.reduce(
-        (total, cat) => total + Number(cat.total),
-        0,
-    );
-    // persentase selalu dari pemasukan, bukan dari total pengeluaran — biar proporsinya jujur
-    const income = Number(summary.income) || 0;
-    const leftover = income - totalExpense;
-    const expenseAlloc = [
-        ...expenseByCategory,
-        ...(leftover > 0 && income > 0
-            ? [
-                  {
-                      id: -1,
-                      name: t('Sisa uang'),
-                      color: 'var(--muted-foreground)',
-                      total: leftover,
-                  },
-              ]
-            : []),
+};
+
+/** First day of the month `back` months ago, as YYYY-MM-DD in local time. */
+const monthStart = (back: number) => {
+    const now = new Date();
+    const d = new Date(now.getFullYear(), now.getMonth() - back, 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+};
+
+const shortMonth = (month: string) =>
+    new Intl.DateTimeFormat(locale() === 'en' ? 'en-US' : 'id-ID', { month: 'short' }).format(new Date(`${month}-01T12:00:00`));
+
+export default function Reports({ filters, summary, monthly, expenseByCategory, incomeByCategory, insights, categoryTransactions }: Props) {
+    const today = localDate();
+    const presets = [
+        { label: t('Bulan ini'), from: monthStart(0) },
+        { label: t('3 bulan'), from: monthStart(2) },
+        { label: t('6 bulan'), from: monthStart(5) },
+        { label: t('Tahun ini'), from: `${today.slice(0, 4)}-01-01` },
     ];
-    const apply = (e: React.FormEvent<HTMLFormElement>) => {
+    const activePreset = filters.to === today ? presets.find((p) => p.from === filters.from) : undefined;
+    const [customOpen, setCustomOpen] = useState(!activePreset);
+    const [kind, setKind] = useState<Kind>('expense');
+    const [category, setCategory] = useState<CategoryTotal | null>(null);
+    const [month, setMonth] = useState<Month | null>(null);
+
+    const income = Number(summary.income) || 0;
+    const expense = Number(summary.expense) || 0;
+    const net = income - expense;
+    const list = kind === 'expense' ? expenseByCategory : incomeByCategory;
+    const listTotal = list.reduce((sum, c) => sum + Number(c.total), 0);
+    // every month in range gets a slot; months with no entries show as zero ticks
+    const trend: Month[] = (() => {
+        const filled: Month[] = [];
+        const byMonth = new Map(monthly.map((m) => [m.month, m]));
+        for (let m = filters.from.slice(0, 7); m <= filters.to.slice(0, 7); m = shiftMonth(m, 1)) {
+            filled.push(byMonth.get(m) ?? ({ month: m, income: 0, expense: 0 } as Month));
+        }
+        return filled;
+    })();
+    const insightMonth = monthly.at(-1)?.month;
+    const max = Math.max(...trend.flatMap((m) => [Number(m.income), Number(m.expense)]), 1);
+    const pct = (part: number, whole: number) => (whole > 0 ? Math.round((part / whole) * 100) : 0);
+    // uncategorised totals come back as id 0; their transactions are grouped under the null key ''
+    const txFor = (cat: CategoryTotal) =>
+        (categoryTransactions[cat.id === 0 ? '' : String(cat.id)] ?? []).filter((tx) => !tx.type || tx.type === kind);
+
+    const applyCustom = (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
-        const form = new FormData(e.currentTarget);
-        const from = form.get('from');
-        const to = form.get('to');
-        router.get(
-            '/reports',
-            {
-                from: typeof from === 'string' ? from : '',
-                to: typeof to === 'string' ? to : '',
-            },
-            { preserveState: true },
-        );
+        const data = new FormData(e.currentTarget);
+        router.get('/reports', { from: String(data.get('from') ?? ''), to: String(data.get('to') ?? '') }, { preserveState: true, preserveScroll: true });
     };
-    const max = Math.max(
-        ...monthly.flatMap((item) => [
-            Number(item.income),
-            Number(item.expense),
-        ]),
-        1,
+
+    const exportLink = (className: string) => (
+        <a href={`/exports/finance.xlsx?from=${filters.from}&to=${filters.to}`} download className={className}>
+            <Download className="size-4" /> {t('Export Excel')}
+        </a>
     );
+
     return (
         <>
             <Head title={t('Laporan')} />
-            <main
-                id="main-content"
-                className="finance-page flex flex-1 flex-col gap-6 p-4 md:p-6 lg:p-8"
-            >
-                <PageHeading
-                    eyebrow={t('Analisis')}
-                    title={t('Laporan keuangan')}
-                    description={t(
-                        'Kenali pola keuangan lo. Bandingkan arus kas dan unduh laporan lengkap.',
-                    )}
-                    action={
-                        <Button asChild>
-                            <a
-                                href={`/exports/finance.xlsx?from=${filters.from}&to=${filters.to}`}
-                            >
-                                <Download /> {t('Export Excel')}
-                            </a>
-                        </Button>
-                    }
-                />
-                <Card className="border-border/70">
-                    <CardContent className="p-4 sm:p-5">
-                        <form
-                            onSubmit={apply}
-                            className="grid items-end gap-4 sm:grid-cols-[1fr_1fr] lg:grid-cols-[1fr_1fr_auto]"
-                        >
-                            <DateField label={t('Dari')} name="from" value={filters.from} />
-                            <DateField label={t('Sampai')} name="to" value={filters.to} />
-                            <Button
-                                className="min-h-11 w-full sm:w-auto"
-                                variant="outline"
-                            >
-                                {t('Terapkan filter')}
-                            </Button>
-                        </form>
-                    </CardContent>
-                </Card>
-                <section className="grid gap-4 md:grid-cols-3">
-                    <Metric
-                        title={t('Pemasukan')}
-                        value={summary.income}
-                        icon={TrendingUp}
-                        tone="emerald"
-                        details={categoryDetails(incomeByCategory, summary.income)}
-                        categoryData={incomeByCategory}
-                        categoryTransactions={categoryTransactions}
-                    />
-                    <Metric
-                        title={t('Pengeluaran')}
-                        value={summary.expense}
-                        icon={TrendingDown}
-                        tone="rose"
-                        details={categoryDetails(expenseByCategory, summary.expense)}
-                        categoryData={expenseByCategory}
-                        categoryTransactions={categoryTransactions}
-                    />
-                    <Metric
-                        title={t('Arus bersih')}
-                        value={summary.income - summary.expense}
-                        icon={
-                            summary.income >= summary.expense
-                                ? TrendingUp
-                                : TrendingDown
-                        }
-                        tone="teal"
-                        details={[
-                            { label: t('Gaji rutin'), value: rupiah(summary.recurringIncome), tone: 'positive' },
-                            ...(summary.bonusIncome > 0
-                                ? [{ label: t('Bonus (di luar patokan)'), value: rupiah(summary.bonusIncome) }]
-                                : []),
-                            { label: t('Pengeluaran'), value: rupiah(summary.expense), tone: 'negative' },
-                            { label: t('Sisa berdasarkan gaji'), value: rupiah(summary.recurringIncome - summary.expense) },
-                            { label: t('Arus kas aktual'), value: rupiah(summary.income - summary.expense) },
-                        ]}
-                    />
-                </section>
-                {insights.length > 0 && (
-                    <Card>
-                        <CardHeader>
-                            <CardTitle>{t('Saran otomatis')}</CardTitle>
-                        </CardHeader>
-                        <CardContent className="space-y-3">
-                            {insights.map((ins, i) => (
-                                <div
-                                    key={i}
-                                    className={`flex items-start gap-3 rounded-xl p-4 text-sm ${
-                                        ins.type === 'positive'
-                                            ? 'bg-emerald-50 text-emerald-900 dark:bg-emerald-950/50 dark:text-emerald-200'
-                                            : 'bg-amber-50 text-amber-900 dark:bg-amber-950/50 dark:text-amber-200'
-                                    }`}
+            <Page>
+                <PageHeader
+                    title={t('Laporan')}
+                    description={`${shortDate(filters.from)} – ${shortDate(filters.to)}`}
+                    actions={exportLink('btn-kuning hidden min-h-11 items-center gap-2 rounded-xl px-4 text-sm lg:inline-flex')}
+                >
+                    <div className="flex flex-col gap-3">
+                        <nav aria-label={t('Rentang waktu')} className="scroll-x -mx-4 gap-1.5 px-4 sm:mx-0 sm:px-0">
+                            {presets.map((p) => (
+                                <Link
+                                    key={p.label}
+                                    href={`/reports?from=${p.from}&to=${today}`}
+                                    prefetch={['hover']}
+                                    preserveScroll
+                                    onClick={() => setCustomOpen(false)}
+                                    aria-current={activePreset === p && !customOpen ? 'true' : undefined}
+                                    className="chip"
                                 >
-                                    {ins.type === 'positive' ? (
-                                        <CircleCheck className="mt-0.5 size-4 shrink-0" />
-                                    ) : (
-                                        <CircleAlert className="mt-0.5 size-4 shrink-0" />
-                                    )}
-                                    <span>{ins.text}</span>
-                                </div>
+                                    {p.label}
+                                </Link>
                             ))}
-                            <p className="text-muted-foreground text-xs">
-                                {t(
-                                    'Patokan: aturan 50/30/20 — Warren & Tyagi, All Your Worth (2005): tabungan ≥20% pemasukan; satu kategori idealnya <50% pemasukan; dana darurat ideal 3–6× pengeluaran bulanan.',
-                                )}
-                            </p>
-                        </CardContent>
-                    </Card>
-                )}
-                <section className="grid gap-4 md:grid-cols-2">
-                    <DonutCard
-                        title={t('Alokasi pemasukan')}
-                        subtitle={
-                            income > 0
-                                ? `${t('Pengeluaran')} ${rupiah(totalExpense)} (${Math.round((totalExpense / income) * 100)}% ${t('pemasukan')}) · ${t('sisa')} ${rupiah(leftover)}`
-                                : undefined
-                        }
-                        data={expenseAlloc}
-                        total={income}
-                        emptyText={t('Belum ada pengeluaran di rentang ini.')}
-                    />
-                    <DonutCard
-                        title={t('Komposisi pemasukan')}
-                        data={incomeByCategory}
-                        total={incomeByCategory.reduce(
-                            (s, c) => s + Number(c.total),
-                            0,
+                            <button
+                                type="button"
+                                aria-pressed={customOpen}
+                                aria-expanded={customOpen}
+                                onClick={() => setCustomOpen((v) => !v)}
+                                className="chip gap-1.5"
+                            >
+                                <CalendarRange className="size-4" /> {t('Pilih tanggal')}
+                            </button>
+                        </nav>
+                        {customOpen && (
+                            <form key={`${filters.from}-${filters.to}`} onSubmit={applyCustom} className="grid grid-cols-2 items-end gap-3 sm:flex">
+                                <Field label={t('Dari')} htmlFor="rp-from" className="sm:w-44">
+                                    <input id="rp-from" name="from" type="date" defaultValue={filters.from} required className="field" />
+                                </Field>
+                                <Field label={t('Sampai')} htmlFor="rp-to" className="sm:w-44">
+                                    <input id="rp-to" name="to" type="date" defaultValue={filters.to} required className="field" />
+                                </Field>
+                                <button type="submit" className="chip col-span-2 min-h-11 justify-center sm:col-span-1">
+                                    {t('Terapkan')}
+                                </button>
+                            </form>
                         )}
-                        emptyText={t('Belum ada pemasukan di rentang ini.')}
-                    />
-                </section>
-                <Card>
-                    <CardHeader>
-                        <CardTitle>{t('Pengeluaran per kategori')}</CardTitle>
-                        {totalExpense > 0 && (
-                            <div className="mt-3 flex h-3 gap-1 overflow-hidden rounded-full" aria-hidden="true">
-                                {expenseByCategory.map((cat) => (
-                                    <div
-                                        key={cat.name}
-                                        className="h-full rounded-full"
-                                        style={{
-                                            width: `${(Number(cat.total) / totalExpense) * 100}%`,
-                                            backgroundColor: cat.color,
-                                        }}
-                                    />
-                                ))}
-                            </div>
-                        )}
-                    </CardHeader>
-                    <CardContent>
-                        {expenseByCategory.length === 0 ? (
-                            <p className="text-muted-foreground rounded-xl border border-dashed p-10 text-center text-sm">
-                                {t('Belum ada pengeluaran di rentang ini.')}
-                            </p>
-                        ) : (
-                            <div className="space-y-3">
-                                {expenseByCategory.map((cat, index) => {
-                                            const percentage =
-                                                income > 0
-                                                    ? Math.round(
-                                                          (Number(cat.total) / income) * 100,
-                                                      )
-                                                    : 0;
-                                            const shareOfExpense = totalExpense > 0 ? Math.round((Number(cat.total) / totalExpense) * 100) : 0;
-                                            return (
-                                                <DetailDialog
-                                                    key={cat.name}
-                                                    title={cat.name}
-                                                    description={t('Pengeluaran kategori di rentang ini.')}
-                                                    icon={ReceiptText}
-                                                    items={[
-                                                        {
-                                                            label: t('Total pengeluaran'),
-                                                            value: rupiah(Number(cat.total)),
-                                                            tone: 'negative',
-                                                        },
-                                                        { label: t('% dari pemasukan'), value: `${percentage}%` },
-                                                        { label: t('% dari total pengeluaran'), value: `${shareOfExpense}%` },
-                                                        { label: t('Peringkat'), value: `#${index + 1}` },
-                                                    ]}
-                                            trigger={
-                                                <button
-                                                    type="button"
-                                                    className="hover:bg-muted/60 focus-visible:ring-ring grid w-full gap-2 rounded-xl p-2 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none"
-                                                >
-                                                    <div className="flex w-full items-center gap-2 text-xs">
-                                                        <span
-                                                            className="size-2.5 shrink-0 rounded-full"
-                                                            style={{ backgroundColor: cat.color }}
-                                                        />
-                                                        <span className="min-w-0 flex-1 font-medium">
-                                                            {cat.name}
-                                                        </span>
-                                                        <span className="font-semibold tabular-nums">
-                                                            {rupiah(Number(cat.total))}
-                                                        </span>
-                                                        <span className="text-muted-foreground w-9 text-right tabular-nums">
-                                                            {percentage}%
-                                                        </span>
-                                                    </div>
-                                                    <div className="bg-muted h-2 w-full overflow-hidden rounded-full">
-                                                        <div
-                                                            className="h-full rounded-full"
-                                                            style={{
-                                                                width: `${percentage}%`,
-                                                                backgroundColor: cat.color,
-                                                            }}
-                                                        />
-                                                    </div>
-                                                </button>
-                                            }
-                                        >
-                                            <div className="border-border mt-4 max-h-64 divide-y overflow-y-auto rounded-2xl border">
-                                                {(categoryTransactions[String(cat.id)] ?? []).map(
-                                                    (tx, i) => (
-                                                        <div
-                                                            key={`${tx.date}-${i}`}
-                                                            className="flex items-center gap-3 px-4 py-3 text-sm"
-                                                        >
-                                                            <span className="min-w-0 flex-1 truncate">
-                                                                {tx.title}
-                                                            </span>
-                                                            <span className="text-muted-foreground shrink-0 text-xs">
-                                                                {tx.date}
-                                                            </span>
-                                                            <span className="shrink-0 font-semibold tabular-nums">
-                                                                {rupiah(tx.amount)}
-                                                            </span>
-                                                        </div>
-                                                    ),
-                                                )}
-                                            </div>
-                                        </DetailDialog>
-                                    );
-                                })}
-                            </div>
-                        )}
-                    </CardContent>
-                </Card>
-                <Card>
-                    <CardHeader>
-                        <CardTitle>{t('Tren bulanan')}</CardTitle>
-                        <div className="text-muted-foreground mt-3 flex flex-wrap gap-4 text-xs">
-                            <span className="flex items-center gap-2">
-                                <span className="size-2 rounded-full bg-emerald-500" />
-                                {t('Pemasukan')}
-                            </span>
-                            <span className="flex items-center gap-2">
-                                <span className="size-2 rounded-full bg-rose-500" />
-                                {t('Pengeluaran')}
-                            </span>
+                    </div>
+                </PageHeader>
+
+                <section aria-label={t('Ringkasan rentang')} className="plank-papan flex flex-col gap-6 p-5 sm:p-7">
+                    <div>
+                        <p className="label-caps">{t('Arus kas bersih')}</p>
+                        <Money value={net} sign={net > 0 ? '+' : undefined} className="mt-3 block text-[clamp(2.5rem,10.5vw,3.75rem)]" />
+                    </div>
+                    <dl className="grid grid-cols-2 gap-x-4 gap-y-4 border-t border-white/15 pt-5 sm:grid-cols-4">
+                        <div>
+                            <dt className="label-caps">{t('Masuk')}</dt>
+                            <dd className="mt-1.5">
+                                <Money value={income} sign="+" className="text-xl sm:text-2xl" />
+                            </dd>
                         </div>
-                    </CardHeader>
-                    <CardContent>
-                        {monthly.length === 0 ? (
-                            <p className="text-muted-foreground rounded-xl border border-dashed p-10 text-center text-sm">
-                                {t('Belum ada data di rentang ini.')}
-                            </p>
-                        ) : (
-                            <div className="space-y-6">
-                                {monthly.map((item) => (
-                                    <DetailDialog
-                                        key={item.month}
-                                        title={item.month}
-                                        description={t('Tren bulanan')}
-                                        icon={
-                                            item.income >= item.expense
-                                                ? TrendingUp
-                                                : TrendingDown
-                                        }
-                                        items={[
-                                            {
-                                                label: t('Pemasukan'),
-                                                value: rupiah(
-                                                    Number(item.income),
-                                                ),
-                                                tone: 'positive',
-                                            },
-                                            {
-                                                label: t('Pengeluaran'),
-                                                value: rupiah(
-                                                    Number(item.expense),
-                                                ),
-                                                tone: 'negative',
-                                            },
-                                            {
-                                                label: t('Arus bersih'),
-                                                value: rupiah(
-                                                    Number(item.income) -
-                                                        Number(item.expense),
-                                                ),
-                                                tone:
-                                                    item.income >= item.expense
-                                                        ? 'positive'
-                                                        : 'negative',
-                                            },
-                                        ]}
-                                        trigger={
-                                            <button
-                                                type="button"
-                                                className="hover:bg-muted/60 focus-visible:ring-ring grid w-full gap-2 rounded-xl p-2 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none sm:grid-cols-[90px_1fr_130px]"
-                                            >
-                                                <span className="text-sm font-medium">
-                                                    {item.month}
-                                                </span>
-                                                <div className="space-y-1.5">
-                                                    <div className="h-3 rounded-full bg-emerald-100 dark:bg-emerald-950">
-                                                        <div
-                                                            className="h-full rounded-full bg-emerald-500"
-                                                            style={{
-                                                                width: `${(Number(item.income) / max) * 100}%`,
-                                                            }}
-                                                        />
-                                                    </div>
-                                                    <div className="h-3 rounded-full bg-rose-100 dark:bg-rose-950">
-                                                        <div
-                                                            className="h-full rounded-full bg-rose-500"
-                                                            style={{
-                                                                width: `${(Number(item.expense) / max) * 100}%`,
-                                                            }}
-                                                        />
-                                                    </div>
-                                                </div>
-                                                <div className="text-left text-xs tabular-nums sm:text-right">
-                                                    <p className="text-emerald-700 dark:text-emerald-400">
-                                                        +
-                                                        {rupiah(
-                                                            Number(item.income),
-                                                        )}
-                                                    </p>
-                                                    <p className="text-rose-700 dark:text-rose-400">
-                                                        −
-                                                        {rupiah(
-                                                            Number(
-                                                                item.expense,
-                                                            ),
-                                                        )}
-                                                    </p>
-                                                </div>
-                                            </button>
-                                        }
-                                    />
-                                ))}
+                        <div>
+                            <dt className="label-caps">{t('Keluar')}</dt>
+                            <dd className="mt-1.5">
+                                <Money value={expense} sign="−" className="text-xl sm:text-2xl" />
+                            </dd>
+                        </div>
+                        <div>
+                            <dt className="label-caps">{t('Gaji rutin')}</dt>
+                            <dd className="mt-1.5">
+                                <Money value={summary.recurringIncome} sign="+" className="text-xl" />
+                                {summary.bonusIncome > 0 && (
+                                    <span className="text-papan-soft mt-1 block text-xs">
+                                        {t('Bonus (di luar patokan)')} {rupiah(summary.bonusIncome)}
+                                    </span>
+                                )}
+                            </dd>
+                        </div>
+                        <div>
+                            <dt className="label-caps">{t('Sisa berdasarkan gaji')}</dt>
+                            <dd className="mt-1.5">
+                                <Money value={summary.recurringIncome - expense} className="text-xl" />
+                            </dd>
+                        </div>
+                    </dl>
+                </section>
+
+                <Section title={t('Tren bulanan')}>
+                    {trend.length === 0 || monthly.length === 0 ? (
+                        <EmptyState icon={ReceiptText} title={t('Belum ada data di rentang ini.')} text={t('Coba rentang lain, atau catat transaksi dulu.')} />
+                    ) : (
+                        <div className="plank p-4 sm:p-5">
+                            <div className="text-muted-foreground mb-3 flex gap-4 text-xs">
+                                <span className="flex items-center gap-1.5">
+                                    <span className="bg-masuk size-2.5 rounded-sm" /> + {t('Masuk')}
+                                </span>
+                                <span className="flex items-center gap-1.5">
+                                    <span className="bg-keluar size-2.5 rounded-sm" /> − {t('Keluar')}
+                                </span>
                             </div>
+                            <ul
+                                aria-label={t('Tren bulanan')}
+                                className="scroll-x -mx-1 gap-1 px-1"
+                                // phones: open on the latest month, older ones scroll in from the left
+                                ref={(el) => {
+                                    if (el) el.scrollLeft = el.scrollWidth;
+                                }}
+                            >
+                                {trend.map((m) => (
+                                    <li key={m.month} className="flex min-w-14 max-w-24 flex-1">
+                                        <button
+                                            type="button"
+                                            onClick={() => setMonth(m)}
+                                            aria-label={`${monthLabel(m.month)}: ${t('Masuk')} +${rupiah(Number(m.income))}, ${t('Keluar')} −${rupiah(Number(m.expense))}`}
+                                            className="row-press flex w-full flex-col items-center gap-2 rounded-lg px-1 pt-2 pb-1"
+                                        >
+                                            <span className="flex h-44 items-end gap-1" aria-hidden="true">
+                                                <span className="bg-masuk w-4 rounded-t-sm sm:w-5" style={{ height: `${Number(m.income) ? Math.max((Number(m.income) / max) * 100, 2) : 0}%` }} />
+                                                <span className="bg-keluar w-4 rounded-t-sm sm:w-5" style={{ height: `${Number(m.expense) ? Math.max((Number(m.expense) / max) * 100, 2) : 0}%` }} />
+                                            </span>
+                                            <span className="text-muted-foreground text-xs capitalize" aria-hidden="true">
+                                                {shortMonth(m.month)}
+                                            </span>
+                                        </button>
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
+                </Section>
+
+                <div className="grid gap-8 lg:grid-cols-12 lg:gap-6">
+                    <Section title={kind === 'expense' ? t('Ke mana uangnya') : t('Dari mana uangnya')} className="lg:col-span-7">
+                        <Segmented<Kind>
+                            label={t('Jenis kategori')}
+                            value={kind}
+                            onChange={setKind}
+                            options={[
+                                { value: 'expense', label: t('Pengeluaran') },
+                                { value: 'income', label: t('Pemasukan') },
+                            ]}
+                        />
+                        {kind === 'expense' && income > 0 && expense > 0 && (
+                            <p className="text-muted-foreground text-sm">
+                                {t('Keluar')} {pct(expense, income)}% {t('dari pemasukan')} · {net >= 0 ? t('sisa') : t('tekor')}{' '}
+                                <span className={cn('font-semibold', net >= 0 ? 'text-masuk' : 'text-keluar')}>
+                                    {net >= 0 ? '+' : '−'}
+                                    {rupiah(Math.abs(net))}
+                                </span>
+                            </p>
                         )}
-                    </CardContent>
-                </Card>
-            </main>
+                        <div className="plank p-2 sm:p-3">
+                            {list.length === 0 ? (
+                                <p className="text-muted-foreground px-3 py-8 text-center text-sm">
+                                    {kind === 'expense' ? t('Belum ada pengeluaran di rentang ini.') : t('Belum ada pemasukan di rentang ini.')}
+                                </p>
+                            ) : (
+                                <ul className="flex flex-col">
+                                    {list.map((cat) => {
+                                        const share = listTotal > 0 ? (Number(cat.total) / listTotal) * 100 : 0;
+                                        return (
+                                            <li key={cat.id}>
+                                                <button type="button" onClick={() => setCategory(cat)} className="row-press flex w-full flex-col gap-2 rounded-lg px-3 py-3 text-left">
+                                                    <span className="flex w-full items-baseline gap-3">
+                                                        <span className="min-w-0 flex-1 truncate text-sm font-medium">{cat.name}</span>
+                                                        <span className="text-muted-foreground text-xs tabular-nums">{Math.round(share)}%</span>
+                                                        <Money value={Number(cat.total)} className="text-lg" />
+                                                    </span>
+                                                    <span className="bg-sunken block h-2.5 w-full overflow-hidden rounded-full">
+                                                        <span className="block h-full rounded-full" style={{ width: `${Math.max(share, 1.5)}%`, background: cat.color }} />
+                                                    </span>
+                                                </button>
+                                            </li>
+                                        );
+                                    })}
+                                </ul>
+                            )}
+                        </div>
+                    </Section>
+
+                    <Section title={t('Kata DompetKu')} className="lg:col-span-5">
+                        {insightMonth && (
+                            <p className="text-muted-foreground -mt-1 text-sm">
+                                {t('Berdasarkan bulan')} <span className="text-foreground font-medium capitalize">{monthLabel(insightMonth)}</span>
+                            </p>
+                        )}
+                        {insights.length === 0 ? (
+                            <p className="plank text-muted-foreground p-4 text-sm">{t('Belum ada saran buat rentang ini.')}</p>
+                        ) : (
+                            <ul className="bg-sunken divide-border flex flex-col divide-y rounded-[var(--radius)]">
+                                {insights.map((insight, i) => (
+                                    <li key={i} className="flex items-start gap-3 p-4 text-sm leading-relaxed">
+                                        {insight.type === 'positive' ? (
+                                            <CircleCheck className="text-masuk mt-0.5 size-4 shrink-0" aria-label={t('Aman')} />
+                                        ) : (
+                                            <CircleAlert className="dark:text-kuning mt-0.5 size-4 shrink-0 text-[#a16207]" aria-label={t('Perhatian')} />
+                                        )}
+                                        <span>{insight.text}</span>
+                                    </li>
+                                ))}
+                            </ul>
+                        )}
+                        <p className="text-muted-foreground text-xs leading-relaxed">
+                            {t(
+                                'Patokan: aturan 50/30/20 — Warren & Tyagi, All Your Worth (2005): tabungan ≥20% pemasukan; satu kategori idealnya <50% pemasukan; dana darurat ideal 3–6× pengeluaran bulanan.',
+                            )}
+                        </p>
+                        {exportLink('btn-kuning inline-flex min-h-12 items-center justify-center gap-2 rounded-xl px-4 text-sm lg:hidden')}
+                    </Section>
+                </div>
+            </Page>
+
+            <Panel
+                open={category !== null}
+                onOpenChange={(open) => !open && setCategory(null)}
+                title={category?.name ?? ''}
+                description={
+                    category
+                        ? [
+                              rupiah(Number(category.total)),
+                              `${pct(Number(category.total), listTotal)}% ${kind === 'expense' ? t('dari pengeluaran') : t('dari pemasukan')}`,
+                              ...(kind === 'expense' && income > 0 ? [`${pct(Number(category.total), income)}% ${t('dari pemasukan')}`] : []),
+                              `#${list.indexOf(category) + 1}`,
+                          ].join(' · ')
+                        : undefined
+                }
+            >
+                {category && <TxList items={txFor(category)} kind={kind} />}
+            </Panel>
+
+            <Panel open={month !== null} onOpenChange={(open) => !open && setMonth(null)} title={month ? monthLabel(month.month) : ''}>
+                {month && (
+                    <dl className="plank divide-border divide-y">
+                        <div className="flex items-center justify-between gap-3 px-4 py-3.5">
+                            <dt className="text-sm">{t('Masuk')}</dt>
+                            <dd>
+                                <Money value={Number(month.income)} sign="+" className="text-masuk text-lg" />
+                            </dd>
+                        </div>
+                        <div className="flex items-center justify-between gap-3 px-4 py-3.5">
+                            <dt className="text-sm">{t('Keluar')}</dt>
+                            <dd>
+                                <Money value={Number(month.expense)} sign="−" className="text-keluar text-lg" />
+                            </dd>
+                        </div>
+                        <div className="flex items-center justify-between gap-3 px-4 py-3.5">
+                            <dt className="text-sm font-semibold">{t('Arus bersih')}</dt>
+                            <dd>
+                                <Money value={month.income - month.expense} sign={month.income - month.expense > 0 ? '+' : undefined} className="text-2xl" />
+                            </dd>
+                        </div>
+                    </dl>
+                )}
+            </Panel>
         </>
     );
 }
-function DonutCard({
-    title,
-    subtitle,
-    data,
-    total,
-    emptyText,
-}: {
-    title: string;
-    subtitle?: string;
-    data: CategoryExpense[];
-    total: number;
-    emptyText: string;
-}) {
-    const radius = 42;
-    const circumference = 2 * Math.PI * radius;
-    let offset = 0;
+
+function TxList({ items, kind }: { items: CategoryTx[]; kind: Kind }) {
+    if (items.length === 0) return <p className="text-muted-foreground py-6 text-center text-sm">{t('Belum ada transaksi.')}</p>;
     return (
-        <Card>
-            <CardHeader>
-                <CardTitle>{title}</CardTitle>
-                {subtitle && <p className="text-muted-foreground mt-1 text-xs">{subtitle}</p>}
-            </CardHeader>
-            <CardContent>
-                {data.length === 0 ? (
-                    <p className="text-muted-foreground rounded-xl border border-dashed p-8 text-center text-sm">{emptyText}</p>
-                ) : (
-                    <div className="flex items-center gap-5">
-                        <div className="relative size-36 shrink-0">
-                            <svg viewBox="0 0 100 100" className="size-full -rotate-90" role="img" aria-label={title}>
-                                <circle cx="50" cy="50" r={radius} fill="none" stroke="currentColor" strokeWidth="16" className="text-muted/40" />
-                                {data.map((item) => {
-                                    const length = (Number(item.total) / total) * circumference;
-                                    const circle = <circle key={item.id} cx="50" cy="50" r={radius} fill="none" stroke={item.color} strokeWidth="16" strokeDasharray={`${length} ${circumference - length}`} strokeDashoffset={-offset} />;
-                                    offset += length;
-                                    return circle;
-                                })}
-                            </svg>
-                            <div className="absolute inset-0 grid place-items-center text-center"><strong className="text-sm tabular-nums">{rupiah(total)}</strong></div>
-                        </div>
-                        <div className="min-w-0 flex-1 space-y-2">
-                            {data.slice(0, 5).map((item) => <div key={item.id} className="flex items-center gap-2 text-xs"><span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: item.color }} /><span className="min-w-0 flex-1 truncate">{item.name}</span><span className="font-semibold tabular-nums">{Math.round(Number(item.total) / total * 100)}%</span></div>)}
-                        </div>
-                    </div>
-                )}
-            </CardContent>
-        </Card>
+        <ul className="plank divide-border divide-y">
+            {items.map((tx, i) => (
+                <li key={`${tx.date}-${i}`} className="flex items-center gap-3 px-4 py-3">
+                    <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium">{tx.title}</span>
+                        <span className="text-muted-foreground text-xs">{dayLabel(tx.date)}</span>
+                    </span>
+                    <Money value={tx.amount} sign={kind === 'income' ? '+' : '−'} className={cn('text-lg', kind === 'income' ? 'text-masuk' : 'text-keluar')} />
+                </li>
+            ))}
+        </ul>
     );
 }
 
-function DateField({
-    label,
-    name,
-    value,
-}: {
-    label: string;
-    name: string;
-    value: string;
-}) {
-    const [open, setOpen] = useState(false);
-    const [picked, setPicked] = useState(value);
-    const initial = value ? new Date(`${value}T12:00:00`) : new Date();
-    const [month, setMonth] = useState(new Date(initial.getFullYear(), initial.getMonth(), 1));
-    const ref = useRef<HTMLDivElement>(null);
-    useEffect(() => {
-        const close = (event: MouseEvent) => {
-            if (ref.current && !ref.current.contains(event.target as Node)) setOpen(false);
-        };
-        document.addEventListener('mousedown', close);
-        return () => document.removeEventListener('mousedown', close);
-    }, []);
-    const selected = picked ? new Date(`${picked}T12:00:00`) : null;
-    const days = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
-    const offset = (new Date(month.getFullYear(), month.getMonth(), 1).getDay() + 6) % 7;
-    const monthLabel = month.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
-    const choose = (day: number) => {
-        const next = `${month.getFullYear()}-${String(month.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-        setPicked(next);
-        const input = ref.current?.querySelector('input');
-        if (input) {
-            const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-            setter?.call(input, next);
-            input.dispatchEvent(new Event('input', { bubbles: true }));
-            input.dispatchEvent(new Event('change', { bubbles: true }));
-        }
-        setOpen(false);
-    };
-    return (
-        <div ref={ref} className="relative space-y-2">
-            <Label>{label}</Label>
-            <input type="hidden" name={name} defaultValue={value} />
-            <button
-                type="button"
-                onClick={() => setOpen(!open)}
-                className="border-input bg-background hover:bg-muted flex h-12 w-full items-center gap-3 rounded-2xl border px-4 text-left text-sm"
-            >
-                <CalendarDays className="text-muted-foreground size-4" />
-                <span>{selected?.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }) ?? t('Pilih tanggal')}</span>
-            </button>
-            {open && (
-                <div className="bg-popover border-border absolute z-20 mt-2 w-[336px] max-w-[calc(100vw-2.5rem)] rounded-2xl border p-3 shadow-xl">
-                    <div className="mb-3 flex items-center justify-between">
-                        <button type="button" className="grid size-10 place-items-center rounded-xl hover:bg-muted" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))}><ChevronLeft className="size-4" /></button>
-                        <strong className="capitalize text-sm">{monthLabel}</strong>
-                        <button type="button" className="grid size-10 place-items-center rounded-xl hover:bg-muted" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))}><ChevronRight className="size-4" /></button>
-                    </div>
-                    <div className="grid grid-cols-7 gap-1 text-center text-[11px] text-muted-foreground">{['Sn', 'Sl', 'Rb', 'Kam', 'Jum', 'Sab', 'Mg'].map((day) => <span key={day} className="py-1">{day}</span>)}{Array.from({ length: offset }, (_, i) => <span key={`empty-${i}`} />)}{Array.from({ length: days }, (_, i) => { const day = i + 1; const active = selected?.getDate() === day && selected?.getMonth() === month.getMonth() && selected?.getFullYear() === month.getFullYear(); return <button type="button" key={day} onClick={() => choose(day)} className={`grid aspect-square min-h-10 place-items-center rounded-xl text-xs ${active ? 'bg-[var(--lime)] font-semibold text-[var(--lime-ink)]' : 'hover:bg-muted'}`}>{day}</button>; })}</div>
-                    <div className="mt-3 flex justify-end gap-2 border-t pt-3"><button type="button" className="text-muted-foreground min-h-10 px-3 text-xs" onClick={() => { const now = new Date(); setMonth(new Date(now.getFullYear(), now.getMonth(), 1)); choose(now.getDate()); }}>{t('Hari ini')}</button><button type="button" className="min-h-10 px-3 text-xs font-medium" onClick={() => setOpen(false)}>{t('Tutup')}</button></div>
-                </div>
-            )}
-        </div>
-    );
-}
-
-function categoryDetails(
-    data: CategoryExpense[],
-    total: number,
-): { label: string; value: string; tone?: 'positive' | 'negative' }[] {
-    return data.map((item) => ({
-        label: item.name,
-        value:
-            total > 0
-                ? `${rupiah(item.total)} · ${Math.round((Number(item.total) / total) * 100)}%`
-                : rupiah(item.total),
-    }));
-}
-
-function Metric({
-    title,
-    value,
-    icon: Icon,
-    tone,
-    details = [],
-    categoryData,
-    categoryTransactions,
-}: {
-    title: string;
-    value: number;
-    icon: typeof TrendingUp;
-    tone: string;
-    details?: { label: string; value: string; tone?: 'positive' | 'negative' }[];
-    categoryData?: CategoryExpense[];
-    categoryTransactions?: Record<string, CategoryTx[]>;
-}) {
-    const colors: Record<string, string> = {
-        emerald:
-            'text-emerald-700 bg-emerald-100 dark:text-emerald-300 dark:bg-emerald-950',
-        rose: 'text-rose-700 bg-rose-100 dark:text-rose-300 dark:bg-rose-950',
-        teal: 'text-[var(--lime-ink)] bg-[var(--lime)]',
-    };
-    return (
-        <DetailDialog
-            title={title}
-            description={t('Laporan keuangan')}
-            icon={Icon}
-            items={details.length > 0 ? details : [{ label: t('Nilai'), value: rupiah(value) }]}
-            footer={
-                categoryData && categoryData.length > 0 ? (
-                    <div className="mt-4 space-y-2">
-                        <p className="text-muted-foreground text-xs font-semibold tracking-wide uppercase">
-                            {t('Klik kategori untuk rincian transaksi')}
-                        </p>
-                        {categoryData.map((cat) => (
-                            <DetailDialog
-                                key={cat.id}
-                                title={cat.name}
-                                description={t('Transaksi dalam kategori ini.')}
-                                icon={ReceiptText}
-                                items={[
-                                    { label: t('Total'), value: rupiah(cat.total) },
-                                ]}
-                                trigger={
-                                    <button
-                                        type="button"
-                                        className="hover:bg-muted/60 flex w-full items-center gap-3 rounded-xl border p-3 text-left text-sm transition-colors"
-                                    >
-                                        <span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: cat.color }} />
-                                        <span className="min-w-0 flex-1 truncate">{cat.name}</span>
-                                        <span className="shrink-0 font-semibold tabular-nums">{rupiah(cat.total)}</span>
-                                    </button>
-                                }
-                            >
-                                <div className="border-border mt-4 max-h-64 divide-y overflow-y-auto rounded-2xl border">
-                                    {(categoryTransactions?.[String(cat.id)] ?? [])
-                                        .filter((tx) => !tx.type || tx.type === (title === t('Pemasukan') ? 'income' : 'expense'))
-                                        .map((tx, i) => (
-                                            <div key={`${tx.date}-${i}`} className="flex items-center gap-3 px-4 py-3 text-sm">
-                                                <span className="min-w-0 flex-1 truncate">{tx.title}</span>
-                                                <span className="text-muted-foreground shrink-0 text-xs">{shortDate(tx.date)}</span>
-                                                <span className="shrink-0 font-semibold tabular-nums">{rupiah(tx.amount)}</span>
-                                            </div>
-                                        ))}
-                                    {(categoryTransactions?.[String(cat.id)] ?? []).filter((tx) => !tx.type || tx.type === (title === t('Pemasukan') ? 'income' : 'expense')).length === 0 && (
-                                        <p className="text-muted-foreground px-4 py-3 text-sm">{t('Belum ada transaksi.')}</p>
-                                    )}
-                                </div>
-                            </DetailDialog>
-                        ))}
-                    </div>
-                ) : null
-            }
-            trigger={
-                <button
-                    type="button"
-                    className={
-                        interactiveCardClass +
-                        (tone === 'teal'
-                            ? ' summary-banner bg-[var(--lime)] text-[var(--lime-ink)]'
-                            : '')
-                    }
-                >
-                    <div className="flex flex-wrap items-center justify-between gap-3 p-6">
-                        <div>
-                            <p className="text-muted-foreground text-sm">
-                                {title}
-                            </p>
-                            <p className="mt-2 text-xl font-semibold tabular-nums">
-                                {rupiah(value)}
-                            </p>
-                            <DetailHint />
-                        </div>
-                        <div
-                            className={`grid size-10 place-items-center rounded-xl ring-1 ring-current/10 ${colors[tone]}`}
-                        >
-                            <Icon className="size-5" />
-                        </div>
-                    </div>
-                </button>
-            }
-        />
-    );
-}
 Reports.layout = { breadcrumbs: [{ title: t('Laporan'), href: '/reports' }] };

@@ -24,7 +24,8 @@ Aplikasi catatan keuangan personal berbasis Laravel 13, React 19, Inertia, Postg
 - **Export Excel multi-sheet** termasuk sheet `Analisis` flat untuk parsing AI.
 - Bahasa Indonesia/English serta mode terang/gelap/sistem.
 - Layout mobile-first dengan sidebar off-canvas, form adaptif, dan target sentuh 44 px.
-- Autentikasi, profil, passkey, dan 2FA.
+- Autentikasi, avatar profil, passkey, dan 2FA.
+- PWA yang bisa dipasang dengan fallback offline dan navigasi mobile-first.
 
 ## Menjalankan di lokal
 
@@ -69,3 +70,7 @@ docker compose --env-file .env.production -f compose.production.yml up -d
 Image `app` sudah berisi PHP/vendor/build frontend dan image `web` sudah berisi aset publik, sehingga deploy tidak bergantung pada `vendor`, `node_modules`, atau `public/build` milik host. Pasang TLS pada reverse proxy dan siapkan backup PostgreSQL terjadwal sebelum go-live.
 
 Detail keputusan teknis tersedia di [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
+## Lisensi
+
+Dirilis di bawah [Lisensi MIT](LICENSE).
