@@ -28,3 +28,7 @@ yarn-error.log
 /.vscode
 /.zed
 /.tmp/
+
+/.impeccable/
+/storage/
+
